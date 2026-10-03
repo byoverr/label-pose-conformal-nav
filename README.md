@@ -1,5 +1,4 @@
-<h1 align="center">One Margin for Two Errors</h1>
-<p align="center"><b>Conformal calibration of open-vocabulary semantic maps under label and pose uncertainty</b></p>
+<h1 align="center">Conformal Calibration of Open-Vocabulary Semantic Maps<br>under Label and Pose Uncertainty</h1>
 <p align="center">
   <a href="paper/paper.pdf">Paper (PDF, 5 pages)</a> ·
   <a href="report/report.pdf">Technical report (Russian, full)</a> ·
@@ -194,13 +193,12 @@ tests/           unit tests
 ## Citation
 
 ```bibtex
-@misc{shchetinkin2026onemargin,
-  title  = {One Margin for Two Errors: Conformal Calibration of Open-Vocabulary Semantic Maps
-            under Label and Pose Uncertainty},
+@misc{shchetinkin2026labelpose,
+  title  = {Conformal Calibration of Open-Vocabulary Semantic Maps under Label and Pose Uncertainty},
   author = {Shchetinkin, Sergey},
   year   = {2026},
   note   = {Technical note, BE2R Laboratory test task, ITMO University},
-  url    = {https://github.com/byoverr/calibrated-semantic-nav}
+  url    = {https://github.com/byoverr/label-pose-conformal-nav}
 }
 ```
 

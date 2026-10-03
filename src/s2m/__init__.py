@@ -1,1 +1,1 @@
-"""calibrated-semantic-nav: from open-vocabulary map errors to mission outcomes."""
+"""Conformal calibration of open-vocabulary semantic maps under label and pose uncertainty."""
