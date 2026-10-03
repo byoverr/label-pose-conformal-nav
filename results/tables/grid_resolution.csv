@@ -1,0 +1,9 @@
+res,class,n_scenes,label_cell_lambda_median,label_cell_coverage,label_cell_abstain,label_cell_free_lost,joint_radius_median,joint_coverage,joint_abstain,joint_free_lost
+0.05,indoor_plant,21,0.0,1.0,0.0,0.6367004198567547,1.2298373876248845,0.0,0.9523809523809523,0.0
+0.05,bike,21,0.0,1.0,0.0,0.6367004198567547,0.8015609770940699,0.9523809523809523,0.0,0.11200296369473944
+0.25,indoor_plant,21,0.0,1.0,0.0,0.8242753623188406,nan,nan,1.0,nan
+0.25,bike,21,0.0,1.0,0.0,0.8242753623188406,1.0,1.0,0.0,0.12035398230088495
+0.5,indoor_plant,21,0.0,1.0,0.0,0.9354838709677419,nan,nan,1.0,nan
+0.5,bike,21,0.0,1.0,0.0,0.9354838709677419,1.118033988749895,0.0,0.9523809523809523,0.0
+1.0,indoor_plant,21,0.0,1.0,0.0,1.0,nan,nan,1.0,nan
+1.0,bike,21,0.0,1.0,0.0,1.0,nan,nan,1.0,nan
