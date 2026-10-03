@@ -1,255 +1,214 @@
-# calibrated-semantic-nav
+<h1 align="center">One Margin for Two Errors</h1>
+<p align="center"><b>Conformal calibration of open-vocabulary semantic maps under label and pose uncertainty</b></p>
+<p align="center">
+  <a href="paper/paper.pdf">Paper (PDF, 5 pages)</a> ·
+  <a href="report/report.pdf">Technical report (Russian, full)</a> ·
+  <a href="docs/journal.md">Decision log</a> ·
+  <a href="#reproduce">Reproduce</a>
+</p>
 
-**Can a robot plan safely on an open-vocabulary semantic map when both the labels and its own pose are wrong?**
-This repository measures how label errors and pose drift turn into safety violations of a planner, and tests
-whether **one calibrated quantity — the *miss distance*** — gives the planner a statistical guarantee that covers
-both error sources at once.
+<p align="center"><img src="results/figures/example_v3_sc0_staging_20.png" width="85%"></p>
+<p align="center"><sub>One pass-by task at 2 cm pose drift. The uncalibrated keep-out zone (orange) misses part of the real
+plant, and the shortest path passes within 0.5 m of it (black). The joint margin (blue) covers it, and the path detours.</sub></p>
 
-Test task for the BE2R lab (ITMO), direction *semantic mapping, visual grounding and navigation*;
-also the first step of a master's thesis on motion planning under uncertainty.
-Full write-up (in Russian): [`report/report.pdf`](report/report.pdf). Decision log: [`docs/journal.md`](docs/journal.md).
+> Test task for the BE2R lab (ITMO), direction *semantic mapping, visual grounding and navigation*, and the
+> first step of a master's thesis on motion planning under uncertainty. Not peer reviewed.
+
+## TL;DR
+
+A robot that avoids "the plant" on an open-vocabulary map gets two errors at once:
+- the detector under-covers or mislabels the object;
+- the pose estimate drifts, so the object is drawn in the wrong place.
+
+Published planners with statistical guarantees calibrate only the first and assume a known pose. We calibrate one
+per-scene quantity, the **miss distance**: how far the true object sticks out of its class region on the map built
+with the estimated poses, in the planner's frame. Its conformal quantile is a keep-out margin that covers both
+errors and certifies **any** planner.
+
+Coverage of the guarantee *"every true bike lies inside the keep-out margin"* at 1 − α = 0.9
+(21 ReplicaCAD scenes, 200 calibration/test splits). Drift is labelled by the median ATE over the scenes. Plants
+behave the same; see the [table](results/tables/coverage.csv).
+
+| calibration of the margin | known pose | 2 cm drift | 45 cm drift | margin at 45 cm |
+|---|:-:|:-:|:-:|:-:|
+| none (map as is) | 0.00 | 0.00 | 0.01 | 0 |
+| per-cell label sets (Sundarsingh et al.-style) | 1.00¹ | 0.73 | 0.17 | — |
+| labels only (calibrated without drift) | 0.93 | 0.94 | **0.76** | 0.75 m |
+| pose only (calibrated with true labels) | 0.00 | 0.03 | 0.82 | 0.90 m |
+| labels + pose, sum of separate quantiles | 0.93 | 0.98 | 0.97 | 1.60 m |
+| **joint miss distance (this work)** | **0.93** | **0.94** | **0.93** | **1.17 m** |
+
+¹ only by declaring every occupied cell hazardous (calibrated threshold λ* = 0).
+
+In missions, the uncalibrated planner passes closer than 0.5 m to a real plant or bike in 27–37 % of its paths on hard
+pass-by tasks and in 4–6 % of unselected tasks. Every calibrated planner has **zero** such paths.
 
 ## Key findings
 
-21 ReplicaCAD scenes from OSMa-Bench, per-class conformal calibration at α = 0.1, 200 random scene splits
-(13 calibration / 8 test), six levels of pose drift. Full tables: [`results/tables/`](results/tables).
+1. **Single-source calibration breaks under the other error.**
+   - Labels-only margins hold while drift is small compared with the label error (≤ 7 cm ATE) and fail at
+     odometry-level drift (0.76 at 45 cm).
+   - Per-cell label sets fail already at 2 cm (0.73) because they have no geometric slack.
+   - Pose-only margins cannot see detector errors (≤ 0.22 up to 7 cm).
+2. **The joint margin holds 0.93–0.94 at every drift level.** At 45 cm drift it is 27 % smaller than the sum of
+   separate quantiles: 1.17 vs 1.60 m for the bike, 1.52 vs 2.10 m for the plant.
+3. **Against the closest method, in its own setting.**
+   - In its setting (known pose, closed 5-class vocabulary, 1 − α = 0.95, unselected tasks) the two are **equal**:
+     mission success 0.43 vs 0.42, no unsafe missions.
+   - With 2 / 7 cm drift its coverage falls to 0.42 / 0.10. Ours stays at 0.94 and succeeds more often:
+     0.61 / 0.50 vs 0.40 / 0.32.
+   - With the open vocabulary ours succeeds 1.8× more often already at known pose (0.78 vs 0.43).
+   - Label-set calibration degenerates to "every occupied cell is hazardous" at every grid size from 5 cm to 1 m,
+     because the detector misses parts of some objects completely. A distance can still say "the object is nearby".
+4. **The price is set by perception, not by the risk level.**
+   - The joint planner finds a safe path in 78 % (known pose) to 68 % (7 cm drift) of unselected tasks, and in
+     ~30 % of deliberately hard pass-by tasks. A planner on the true map solves 98–100 %.
+   - Raising α from 0.1 to 0.3 shrinks the margin by only 0.2 m.
+   - MobileSAM masks cut the typical bike miss from 0.43 to 0.05 m, but not the worst scene, which sets the margin
+     with 13 calibration scenes.
+   - The TV stand, labelled "bench" or "rug" in 2 of 21 scenes, cannot be certified at all (abstention 0.71–0.95).
+5. **The sum of separate quantiles can under-cover.** Its guarantee is only 1 − 2α. Take real label errors and rare
+   localization failures placed in scenes where labels are good: the sum covers 0.66 at a 0.70 target. The joint
+   quantile stays at 0.71–0.78 however the failures are placed.
+6. **Real visual odometry** (Open3D RGB-D, frame to frame, no loop closure; median ATE 78 cm, up to 3.9 m).
+   - The labels-only certificate silently drops to 0.67.
+   - The joint one stays valid but abstains in most splits: without loop closure there is no useful certificate,
+     and the calibration says so.
+   - Calibrated on ReplicaCAD, the guarantee does not transfer to HM3D scenes: one of the two visible plants is missed.
+7. **Map quality does not predict mission safety.** Spearman ρ = −0.16 (p = 0.57, 15 scenes) between scene mIoU
+   and the violation rate of the uncalibrated planner.
+8. **Planner side (thesis bridge).** On calibrated maps the angle-limited sampling zone of a bidirectional RRT needs
+   2.3–3.0× more tree extensions than uniform sampling. Widening the zone after blocked extensions brings this to
+   1.2–1.4× without longer first paths.
 
-1. **An open-vocabulary map almost never contains an object's full true footprint.** Coverage of the uncalibrated
-   map is ≤ 0.01 for bikes and plants, and a planner that trusts it passes closer than the 0.5 m safety distance to a
-   real plant or bike in **27–37 % of its paths** (L0–L3).
-2. **Calibrating only labels is not enough.** Per-cell label calibration (Sundarsingh et al.-style) reaches 1.00
-   without drift only by declaring every occupied cell possibly hazardous, and drops to **0.73 at 3 cm** of pose drift
-   and 0.17 at 63 cm (bike). A labels-only radius holds while drift ≪ label error (≤ 10 cm ATE) but falls to
-   **0.76 at 63 cm**.
-3. **Calibrating only pose is not enough either:** a radius calibrated with ground-truth labels covers ≤ 0.22 up to
-   9.5 cm ATE — it cannot see detector errors.
-4. **Joint miss-distance calibration keeps 0.93–0.94 coverage at every drift level** with the smallest valid radius:
-   at 63 cm ATE 1.18 m vs 1.61 m for the sum of separate quantiles (bike), 1.53 vs 2.11 m (plant). In missions,
-   every calibrated arm has **zero violations**.
-5. **The price is paid by perception.** The certified keep-out (~1.3 m) leaves a path in only ~30 % of pass-by tasks,
-   versus 98 % for a planner on the true map. For the TV stand, which the detector confidently labels "bench" or
-   "rug" in 2 of 21 scenes, honest calibration **refuses** to certify the class (abstention 0.71–0.95); planning with
-   that fallback nearly immobilises the robot.
-6. **Map quality does not predict mission safety:** Spearman ρ = −0.16 (p = 0.57) between scene mIoU and the
-   violation rate of the uncalibrated planner.
-7. **Against the closest method, in its own setting.** On the same scenes with known poses, a closed 5-class
-   vocabulary, 1 − α = 0.95 and unselected start/goal tasks, per-cell label calibration (Sundarsingh et al.-style)
-   and ours are **equal** (mission success 0.43 vs 0.42, no unsafe missions). With 3 cm / 9.5 cm drift its
-   coverage falls to 0.42 / 0.10 while ours stays at 0.94 with more successful missions (0.61 / 0.50 vs
-   0.40 / 0.32). With the open vocabulary ours succeeds **1.8× more often** already at known pose (0.78 vs 0.43):
-   label-set calibration degenerates to "every occupied cell is hazardous" (λ* = 0) at every grid size tried,
-   5 cm to 1 m, because some objects are partly missed by the detector altogether
-   ([comparison](results/figures/comparison.png)). On unselected tasks the joint arm finds a safe path in 78 %
-   (known pose) to 68 % (9.5 cm drift) of tasks; the 30 % above is for deliberately hard pass-by tasks.
-8. **Raising the risk level does not buy feasibility.** From α = 0.1 to 0.3 the joint radius shrinks only from
-   0.81 to 0.60 m (plant) and 0.75 to 0.50 m (bike), and the share of tasks with a path stays at 30–31 % (L3):
-   the floor is set by perception error, not by the risk level ([α sweep](results/figures/alpha_sweep.png)).
-9. **Separate calibration fails when failures are rare and hit different scenes.** With real label errors and
-   injected scene-level localization failures, the sum of separate quantiles covers 0.80–0.84 when the failures
-   coincide with bad labels but only **0.66 at a 0.70 target** when they occur in scenes with good labels; the joint
-   quantile stays at 0.71–0.78 in every configuration. The sum of quantiles only guarantees 1 − 2α.
-10. **The three simplifications, checked one by one.**
-   - *MobileSAM masks:* the typical bike miss drops from 0.43 to 0.05 m, but the worst scene, which sets the
-     quantile at 13 calibration scenes, does not change (0.75 m).
-   - *Real RGB-D visual odometry* (Open3D, frame to frame, no loop closure): median ATE 78 cm with a heavy tail
-     up to 3.9 m. The labels-only certificate silently drops to **0.67** coverage. The joint one stays valid
-     (0.93) but abstains in most splits: there is no useful certificate at this pose quality, and it says so.
-   - *HM3D scenes* calibrated on ReplicaCAD: one of two visible plants is missed entirely, so the guarantee does
-     not transfer between scene families (2 scenes: an illustration, not an estimate).
-11. **Planner side (thesis bridge):** on calibrated maps the angle-limited sampling zone of a bidirectional RRT needs
-   2–3× more tree extensions than uniform sampling; widening the zone after blocked extensions brings this to
-   1.1–1.4× and gives the shortest first paths (1.11–1.15 vs 1.15–1.21 of optimal). Free space, not search, limits
-   solvability.
+## Robustness checks
 
-## The problem in one paragraph
-
-Open-vocabulary maps (ConceptGraphs, BBQ, OpenScene) let a robot avoid "the plant" or "the bike" by name.
-Their labels come from a detector that makes mistakes, and their geometry comes from a pose estimate that drifts.
-Benchmarks such as [OSMa-Bench](https://github.com/be2rlab/OSMa-Bench) show how much these maps degrade, but score
-them as images, without a robot moving through them. The planners that do carry statistical guarantees on top of
-uncertain perception — conformalized semantic maps (Sundarsingh et al., RA-L 2026) and Perceive With Confidence
-(Mei et al., IJRR 2025) — both assume that **the robot's pose is known**. And separately calibrated modules do
-not compose into a calibrated system (Baral, IROS 2026 workshop). The open question: *what guarantee does a planner
-get when label error and pose error act together, and how should it be calibrated?*
+| check | what changes | result |
+|---|---|---|
+| risk level | α = 0.05 / 0.1 / 0.2 / 0.3 | joint at nominal for every α; pass-by tasks solved 10 / 30 / 31 / 31 % |
+| composition stress test | rare localization failures placed with / against / independently of label errors | separate 0.76–0.84 / down to 0.66 / 0.73–0.81 at a 0.70 target; joint 0.71–0.78 |
+| segmentation | MobileSAM masks instead of box + depth | typical miss ~9× smaller, margin unchanged (set by the worst scene) |
+| pose error | Open3D RGB-D odometry instead of synthetic drift | labels-only 0.67; joint 0.93, abstains in 60–86 % of splits |
+| scene family | calibrate on ReplicaCAD, test on HM3D | coverage 0.5 on the 2 scenes with a visible plant |
+| grid resolution | 5 cm … 1 m, per-cell label sets | λ* = 0 everywhere; their keep-out takes 64 % → 100 % of free space |
+| region shape | convex hull / closing of class regions (dev scene) | no change in miss distance |
 
 ## Method
 
-Everything is expressed in the frame the planner actually uses: the drifted world as the robot believes it at
-query time `q`. A map built with drifted poses places an object seen at frame `k` at `D_k p`; the object is truly at
-`D_q p` (`D_k = T̂_k T_k⁻¹` is the accumulated pose error).
-
-For an avoid class `k` (indoor plant, TV stand, bike) the map region is `A_λ(k)` = occupied cells whose
-score-weighted fraction of class-`k` observations is at least `λ`. The **miss distance** of a scene is
+Everything is expressed in the frame the planner uses: the drifted world as the robot believes it at query time
+`q`. A map built with drifted poses places an object seen at frame `k` at `D_k p`, but the object is truly at
+`D_q p`. Here `D_k = T̂_k T_k⁻¹` is the accumulated pose error. The region of class `k` is
+`A_λ(k)` = occupied cells whose score-weighted fraction of class-`k` observations is at least `λ`. The miss
+distance of a scene is
 
 ```
-s_k(Ω) = min( R_max ,  max over true objects e of class k  max over x in e's true footprint  dist(x, A_λ(k)) )
+s_k(Ω) = min( R_max ,  max over true objects e of class k   max over x in e's footprint   dist(x, A_λ(k)) )
 ```
 
-A wrong or missing label makes it large; a pose shift makes it equal to the shift — one number absorbs both.
-With one score per scene (cells and frames of a scene are not exchangeable) the split-conformal quantile `q̂_k` of
-`n` calibration scenes gives `P(every true class-k footprint ⊆ A_λ(k) ⊕ B(q̂_k)) ≥ 1 − α`. A planner keeping
-`dist(x, A_λ(k)) ≥ d + q̂_k` therefore keeps true distance `≥ d` (triangle inequality) — for **any** planner.
-The planner decides whether a path still exists once the free space is narrowed.
+A wrong or missing label makes it large; a pose shift makes it equal to the shift. There is one score per scene,
+because cells and frames of a scene are not exchangeable. The split-conformal quantile `q̂_k` of `n` calibration
+scenes gives `P(every true class-k footprint ⊆ A_λ(k) ⊕ B(q̂_k)) ≥ 1 − α`. A planner that keeps
+`dist(x, A_λ(k)) ≥ d + q̂_k` therefore keeps a true distance `≥ d` by the triangle inequality, whatever the planner.
 
-Compared arms share the same region and differ only in what the radius is calibrated on:
-
-| arm | radius calibrated on |
+| arm | margin calibrated on |
 |---|---|
-| uncalibrated | — (radius 0) |
+| uncalibrated | — (margin 0) |
 | labels only | detector map at ground-truth poses |
 | pose only | ground-truth-label map built with drifted poses |
-| separate | labels-only radius + pose-only radius, each at α |
+| separate | labels-only margin + pose-only margin, each at α |
 | **joint (ours)** | detector map built with drifted poses |
-| per-cell label CP (reference) | Sundarsingh et al.-style per-cell label sets, no inflation |
+| per-cell label sets (reference) | Sundarsingh et al.-style label sets per cell, no inflation |
 
-## Setup
-
-- **Data:** [OSMa-Bench](https://huggingface.co/datasets/warmhammer/OSMa-Bench_dataset) ReplicaCAD scenes
-  (RGB-D, GT semantics and poses; every 8th frame, ~0.2 GB). `apt_0` is the dev scene (all design choices), the
-  other scenes are for calibration and test. The published dataset contains one lighting condition per scene.
-- **Perception:** YOLO-World v2-s with the 98 ReplicaCAD object classes as prompts (CLIP text embeddings baked into
-  the weights), depth-consistent box masks, 5 cm top-down grid, fusion by averaging. 24 ms/frame on Apple M (MPS).
-- **Pose drift:** planar odometry-style noise proportional to motion; six levels calibrated once on the dev scene to
-  published magnitudes — L1 ATE 0.6 cm, L2 3 cm, L3 9.5 cm, L4 63 cm (≈3 % of path), L5 3.5 m (≈16 %, stress);
-  10 realizations per level ([protocol](docs/drift_protocol.md)).
-- **Calibration:** α = 0.1, 200 random splits of 21 scenes into 13 calibration / 8 test; an arm that cannot produce a finite radius abstains
-  (vacuous certificate), counted as covered and reported separately.
-- **Missions:** "pass-by" tasks — start and goal ≥ 1.5 m from avoid objects, but the shortest geometric path passes
-  within 0.5 m of one, so a safe detour exists and an over-trusting planner cuts the corner. Dijkstra on the predicted
-  map, judged against the true geometry in the planner frame; parameters calibrated leave-one-scene-out; a class whose
-  certificate abstains falls back to "every occupied cell may be that class". Main configuration: plant + bike;
-  system configuration: all three classes.
-- **Planner bridge:** RRT-Connect, the angle-limited dynamic sampling zone of a bidirectional RRT (published rule),
-  and a variant that widens the zone after blocked extensions — same 1500-extension budget, common random numbers.
-
-## Figures
-
-**What the guarantee changes** — one pass-by task at 3 cm drift. The uncalibrated keep-out zone (orange) misses part
-of the real plant, and the shortest path grazes it; the joint zone (blue) covers it and the path detours
-(`scripts/plot_example.py v3_sc0_staging_20 --seed 1 --task 1`):
-
-![example](results/figures/example_v3_sc0_staging_20.png)
-
-**Coverage and the price of the guarantee** (plants and bikes; per-class panels in
-[`coverage_by_class.png`](results/figures/coverage_by_class.png)):
-
-![coverage](results/figures/coverage_headline.png)
-
-**Missions** (plant + bike, 233 pass-by tasks in 15 scenes, 5 drift realizations per level):
-
-![missions](results/figures/missions_vs_drift_pb.png)
-
-**Sampling-based planners on calibrated maps** (L2, keep-out radius scaled by m):
-
-![planners](results/figures/planner_bridge_pb.png)
-
-**Against the closest method** — per-cell label calibration vs joint miss distance on unselected tasks, in its
-setting (top) and ours (bottom):
-
-![comparison](results/figures/comparison.png)
-
-**The price of the guarantee vs the risk level α** (drift L3):
-
-![alpha](results/figures/alpha_sweep.png)
-
-**Composition stress test** (α = 0.3; real label errors, scene-level localization failures placed where labels are
-worst / best / at random):
-
-![composition](results/figures/composition_stress_a03_L5.png)
-
-**Checking the simplifications:** MobileSAM masks, real visual odometry, out-of-distribution HM3D scenes:
-
-![variants](results/figures/variants.png)
-
-**Map quality vs mission safety:** [`miou_vs_violations_pb.png`](results/figures/miou_vs_violations_pb.png)
+**Setup.**
+- **Data.** 22 ReplicaCAD scenes of [OSMa-Bench](https://huggingface.co/datasets/warmhammer/OSMa-Bench_dataset),
+  every 8th frame. `apt_0` is used for every design choice; the other 21 scenes are for calibration and test.
+- **Perception.** YOLO-World v2-s with 98 prompts; depth-consistent box masks; 5 cm top-down grid.
+- **Pose drift.** Planar odometry-style drift at six levels ([protocol](docs/drift_protocol.md)); median ATE
+  0.4 cm, 2 cm, 7 cm, 45 cm and 2.7 m, 10 realizations each.
+- **Calibration.** α = 0.1, 200 random splits into 13 calibration and 8 test scenes.
+- **Missions.** Dijkstra on the predicted map, judged against the true geometry in the planner frame. Margins are
+  calibrated leave-one-scene-out. Task families:
+  - pass-by: the shortest path grazes an avoid object (233 tasks);
+  - random: unselected tasks (420).
 
 ## Reproduce
 
-Python 3.12, CPU or Apple MPS; ~0.2 GB of data, ~25 MB of detector weights.
+Python 3.12, CPU or Apple MPS. Data: ~0.2 GB for the main experiment, ~0.9 GB more for visual odometry.
 
 ```bash
-python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/pip install -e .
-.venv/bin/python scripts/download_subset.py $(cat configs/scenes_replicacad.txt) --step 8   # ~0.3 GB
-.venv/bin/python scripts/run_pipeline.py --seeds 10      # detections + calibration scores per scene
-.venv/bin/python scripts/analyze_coverage.py              # per-class coverage, radius, abstention
-.venv/bin/python scripts/scene_metrics.py                # map mIoU per scene
-.venv/bin/python scripts/run_missions.py --avoid indoor_plant bike --out results/missions_pb   # missions, LOSO
-.venv/bin/python scripts/analyze_missions.py --dir results/missions_pb --tag _pb
-.venv/bin/python scripts/run_planner_bridge.py --avoid indoor_plant bike --out results/tables/planner_bridge_pb_0.csv
-.venv/bin/python scripts/analyze_bridge.py --tag _pb
-# risk level sweep and composition stress test
-for a in 0.05 0.2 0.3; do .venv/bin/python scripts/analyze_coverage.py --alpha $a --tag _a$(echo $a | tr -d .); done
-for a in 0.05 0.2 0.3; do .venv/bin/python scripts/run_missions.py --alpha $a --avoid indoor_plant bike --out results/missions_pb_a$(echo $a | tr -d .); done
-.venv/bin/python scripts/analyze_alpha.py --level L3
-.venv/bin/python scripts/composition_stress.py --alpha 0.3 --fail-level L5
-# comparison with per-cell label calibration in its setting (closed vocabulary, 95 %, random tasks)
-.venv/bin/python scripts/run_detector.py data/replica_cad/* --closed indoor_plant bike tv_stand sofa table --cache data/cache/detections_closed5
-.venv/bin/python scripts/compute_scores.py data/replica_cad/* --detections data/cache/detections_closed5 --out results/scores_closed5
-.venv/bin/python scripts/analyze_coverage.py --scores results/scores_closed5 --alpha 0.05 --tag _closed5_a005
-.venv/bin/python scripts/run_missions.py --kind random --alpha 0.05 --scores results/scores_closed5 --detections data/cache/detections_closed5 --only L0 L2 L3 --avoid indoor_plant bike --out results/missions_rand_closed5_a005
-.venv/bin/python scripts/run_missions.py --kind random --avoid indoor_plant bike --out results/missions_rand
-.venv/bin/python scripts/compare_known_pose.py
-.venv/bin/python scripts/grid_resolution.py --res 0.05 0.25 0.5 1.0
-# variants: MobileSAM masks, real visual odometry, HM3D
-.venv/bin/python scripts/run_segmenter.py data/replica_cad/*          # downloads models/mobile_sam.pt (40 MB) once
-.venv/bin/python scripts/compute_scores.py data/replica_cad/* --masks data/cache/masks_sam --out results/scores_sam
-.venv/bin/python scripts/download_subset.py $(cat configs/scenes_replicacad.txt) --step 2 --rgbd-only --out data/replica_cad_vo   # ~0.9 GB
-.venv/bin/python scripts/run_vo.py data/replica_cad/*
-.venv/bin/python scripts/run_missions.py --scores results/scores results/scores_vo --vo 2 4 --only L0 VO2 VO4 --avoid indoor_plant bike --out results/missions_pb_vo
-.venv/bin/python scripts/download_subset.py 00800-TEEsavR23oF 00802-wcojb4TFT35 00808-y9hTuugGdiq 00813-svBbv1Pavdk 00814-p53SfW6mjZe 00815-h1zeeAwLh9Z --root data/hm3d --out data/hm3d
-.venv/bin/python scripts/run_hm3d.py data/hm3d/*
-.venv/bin/python scripts/analyze_variants.py
-.venv/bin/python scripts/make_report_tables.py && (cd report && tectonic report.tex)
-.venv/bin/python -m pytest -q                             # 25 unit tests
+make setup          # .venv with pinned dependencies (requirements.txt), package installed in editable mode
+make main           # download, YOLO-World detections, calibration scores, coverage, missions
+make comparison     # closed-vocabulary comparison with per-cell label calibration
+make robustness     # alpha sweep, composition stress test, MobileSAM, visual odometry, HM3D, grid resolution
+make bridge         # sampling-based planners on calibrated maps
+make docs           # report tables, report/report.pdf, paper/paper.pdf (needs tectonic)
+make test           # unit tests
 ```
 
-The first detector run downloads YOLO-World v2-s and CLIP once to embed the prompts; afterwards the vocabulary is
-baked into `models/yolov8s-worldv2-vocab98.pt` and CLIP is not needed.
+Every step is a plain script in `scripts/` (see the `Makefile` for the exact commands). Steps that process scenes are
+resumable, and all random draws are seeded. Re-running on the same detections reproduces the CSVs in `results/`
+exactly; the detector's own outputs can differ slightly across hardware. The
+first detector run downloads YOLO-World v2-s and CLIP once to embed the prompts. After that, the vocabulary is baked
+into `models/yolov8s-worldv2-vocab98.pt`.
 
 ## Repository layout
 
 ```
 src/s2m/
-  data.py        OSMa-Bench subset download and scene loading
-  perception.py  YOLO-World wrapper, cached detections, box + depth masks or MobileSAM masks
+  data.py        OSMa-Bench download, scene loading, HM3D -> ReplicaCAD class remapping
+  perception.py  YOLO-World wrapper (open or closed vocabulary), box + depth or MobileSAM masks
   mapping.py     pose-independent frame observations, maps under arbitrary poses
-  drift.py       planar odometry drift, ATE, level calibration
+  drift.py       planar odometry drift, ATE
   odometry.py    real pose error: Open3D RGB-D odometry with the planar ground-robot constraint
   entities.py    avoid-class objects from the ground-truth map
   conformal.py   split-CP quantile, miss distance, per-cell label score
-  experiment.py  scores per scene x drift level x realization
-  analysis.py    calibration arms, per-class coverage over scene splits
+  experiment.py  calibration scores per scene x drift level x realization
+  analysis.py    calibration arms, coverage over scene splits, leave-one-scene-out parameters
   planning.py    Dijkstra on the 8-connected grid, path evaluation
-  missions.py    reach-avoid tasks, keep-out zones per arm, judgement against the truth
+  missions.py    tasks, keep-out zones per arm, judgement against the truth
   rrt.py         RRT-Connect and the angle-limited dynamic sampling zone
-scripts/         download, pipeline, analysis and figure scripts
+  io.py          CSV helpers, drift-level labels
+scripts/         one script per step (run_*, compute_*, analyze_*, plot_*); scripts/sanity/ for one-off checks
 configs/         drift levels, scene list, HM3D -> ReplicaCAD class map
+results/         scores, mission outcomes, tables, figures (all tracked)
+paper/ report/   LaTeX sources and PDFs
 docs/            decision log, drift protocol
-report/          LaTeX report (Russian)
-results/         scores, tables, figures
-tests/           unit tests (drift, conformal coverage, scores, planners)
+tests/           unit tests
 ```
 
-## Limitations (read before citing a number)
+## Limitations
 
-- **Pose error.** The main experiment uses an odometry-style drift model ([protocol](docs/drift_protocol.md)).
-  Real visual odometry was run only as frame-to-frame RGB-D odometry without loop closure; its error is too large
-  for a useful certificate. The middle ground, real SLAM with loop closures, is not tested.
-- **One lighting condition.** The published OSMa-Bench data contains `baseline` only (22 ReplicaCAD scenes); the
-  other conditions require re-rendering with HaDaGe on a GPU.
-- **Few, related scenes.** ReplicaCAD scenes are re-arrangements of one apartment; 13 calibration scenes make the
-  coverage of a single calibration draw widely spread (10th percentile ≈ 0.75–0.83 for the joint arm, as expected
-  from the Beta law of split conformal coverage at small n).
-- **Lightweight perception.** A box detector with depth-consistent or MobileSAM masks, not a full mapper
-  (ConceptGraphs/BBQ).
-- **Out of distribution: two scenes.** Only two of the six single-floor HM3D scenes show an avoid-class object
-  from the recorded trajectory.
-- **2D, planar motion; no execution-time localization error.** The guarantee holds in the planner frame at query time.
-- **Post-hoc choice.** Avoid classes and `λ0` were fixed on the dev scene; dropping the TV stand from the *mission*
-  experiments was decided after seeing that its certificate abstains — both configurations are reported.
-- **Novelty.** No work with a joint distribution-free label + pose guarantee with the planner in the loop was found
-  among the citers of the closest papers and in arXiv/OpenAlex queries (2 Oct 2026); Semantic Scholar keyword
-  search was unavailable on those days.
+- **Pose error.** The main experiment uses an odometry-style drift model. Real visual odometry was run only frame to
+  frame without loop closure; real SLAM with loop closures, the middle ground, is not tested.
+- **One lighting condition, few related scenes.** The published OSMa-Bench data has the `baseline` condition only.
+  ReplicaCAD scenes are re-arrangements of one apartment. With 13 calibration scenes, coverage of a single
+  calibration draw is widely spread: the 10th percentile is 0.75–0.84 for the joint arm.
+- **Lightweight perception.** A box detector with depth-consistent or MobileSAM masks, not a full mapper.
+- **Out of distribution: two scenes.** Only two of six single-floor HM3D scenes show an avoid-class object.
+- **2D, planar motion.** The guarantee holds in the planner frame at query time, not during execution.
+- **Post-hoc choice.** Avoid classes and `λ0` were fixed on the dev scene. Dropping the TV stand from the main mission
+  configuration was decided after seeing that its certificate abstains; the three-class configuration is also
+  reported.
+- **Novelty is preliminary.** It rests on a citation and keyword search of October 2026.
+
+## Citation
+
+```bibtex
+@misc{shchetinkin2026onemargin,
+  title  = {One Margin for Two Errors: Conformal Calibration of Open-Vocabulary Semantic Maps
+            under Label and Pose Uncertainty},
+  author = {Shchetinkin, Sergey},
+  year   = {2026},
+  note   = {Technical note, BE2R Laboratory test task, ITMO University},
+  url    = {https://github.com/byoverr/calibrated-semantic-nav}
+}
+```
+
+## Acknowledgements
+
+- **Data.** [OSMa-Bench](https://github.com/be2rlab/OSMa-Bench) (BE2R Lab, CC BY 4.0), built on ReplicaCAD and HM3D.
+- **Models and libraries.** YOLO-World and MobileSAM through Ultralytics; Open3D.
+- **Planner.** The angle-limited sampling zone follows I. S. Dovgopolik and O. I. Borisov (2025).
 
 ## References
 
@@ -270,3 +229,4 @@ tests/           unit tests (drift, conformal coverage, scores, planners)
 15. Zhou, Park, Koltun. *Open3D: A Modern Library for 3D Data Processing.* arXiv:1801.09847
 16. Steinbrücker, Sturm, Cremers. *Real-time visual odometry from dense RGB-D images.* ICCV Workshops 2011. DOI 10.1109/ICCVW.2011.6130321
 17. Ramakrishnan et al. *Habitat-Matterport 3D Dataset (HM3D).* NeurIPS Datasets and Benchmarks 2021. arXiv:2109.08238
+18. Dovgopolik, Borisov. *Quasi-optimal shortest-path motion planning algorithm with random sampling* (in Russian). Izv. VUZov. Priborostroenie, 2025. DOI 10.17586/0021-3454-2025-68-5-450-455

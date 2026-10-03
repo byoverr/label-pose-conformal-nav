@@ -27,14 +27,19 @@ The noise *shape* is fixed (σ_t : σ_ψr : σ_ψt = 0.05 : 0.05 : 0.01); one mu
 calibrated once on the dev scene `apt_0` (path 33.7 m, 32 seeds) and then applied unchanged to every
 scene, because it describes the pose estimator, not the scene.
 
-| Level | Target | Achieved on apt_0 (mean of 16 seeds) | What it imitates |
-|---|---|---|---|
-| L0 | 0 | 0 | ground-truth poses |
-| L1 | ATE ≈ 0.7 cm | 0.6 cm | dense RGB-D SLAM on synthetic scenes (Replica ATE 0.4–1 cm) |
-| L2 | ATE ≈ 3.5 cm | 3.0 cm | real RGB-D SLAM (TUM ATE ≈ 2–5 cm) |
-| L3 | ATE ≈ 11 cm | 9.5 cm | hard scenes (ScanNet ATE ≈ 10–12 cm) |
-| L4 | end drift ≈ 3 % of path | 2.8 % (ATE 63 cm) | odometry without loop closure |
-| L5 | end drift ≈ 17 % of path | 16.4 % (ATE 3.5 m) | stress test (stereo VIO without loop closure) |
+| Level | Target | On apt_0 (mean of 32 seeds) | On the 21 evaluation scenes (median ATE) | What it imitates |
+|---|---|---|---|---|
+| L0 | 0 | 0 | 0 | ground-truth poses |
+| L1 | ATE ≈ 0.7 cm | 0.7 cm | 0.4 cm | dense RGB-D SLAM on synthetic scenes (Replica ATE 0.4–1 cm) |
+| L2 | ATE ≈ 3.5 cm | 3.6 cm | 2.2 cm | real RGB-D SLAM (TUM ATE ≈ 2–5 cm) |
+| L3 | ATE ≈ 11 cm | 11 cm | 6.7 cm | hard scenes (ScanNet ATE ≈ 10–12 cm) |
+| L4 | end drift ≈ 3 % of path | 3.2 % (ATE 75 cm) | 45 cm (3.6 % of path) | odometry without loop closure |
+| L5 | end drift ≈ 17 % of path | 18 % (ATE 4.3 m) | 2.7 m (21 % of path) | stress test (stereo VIO without loop closure) |
+
+The evaluation scenes have shorter trajectories than the dev scene, so the same per-metre noise gives
+a smaller ATE there. Figures and tables label each level with the median ATE over the evaluation
+scenes (`s2m.io.level_labels`). An earlier version of this table listed 0.6 / 3.0 / 9.5 cm / 63 cm /
+3.5 m as "achieved"; those numbers did not match the configured levels and were corrected on 2026-10-03.
 
 Reference magnitudes come from the literature survey in the companion report (SplaTAM Table 1 for
 Replica/TUM/ScanNet ATE; ZED VIO and quadruped odometry drift for L4–L5).
