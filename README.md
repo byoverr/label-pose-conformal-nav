@@ -100,6 +100,12 @@ Compared arms share the same region and differ only in what the radius is calibr
 
 ## Figures
 
+**What the guarantee changes** — one pass-by task at 3 cm drift. The uncalibrated keep-out zone (orange) misses part
+of the real plant, and the shortest path grazes it; the joint zone (blue) covers it and the path detours
+(`scripts/plot_example.py v3_sc0_staging_20 --seed 1 --task 1`):
+
+![example](results/figures/example_v3_sc0_staging_20.png)
+
 **Coverage and the price of the guarantee** (plants and bikes; per-class panels in
 [`coverage_by_class.png`](results/figures/coverage_by_class.png)):
 
