@@ -1,1 +1,1 @@
-"""semantic-map-to-mission: from open-vocabulary map errors to mission outcomes."""
+"""calibrated-semantic-nav: from open-vocabulary map errors to mission outcomes."""

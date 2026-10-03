@@ -1,4 +1,4 @@
-# semantic-map-to-mission
+# calibrated-semantic-nav
 
 **Work in progress (BE2R test task, Oct 2026).**
 
