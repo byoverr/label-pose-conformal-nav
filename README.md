@@ -202,6 +202,10 @@ tests/           unit tests
 }
 ```
 
+## License
+
+Code: [MIT](LICENSE). The OSMa-Bench data used here is CC BY 4.0; model weights keep their own licenses.
+
 ## Acknowledgements
 
 - **Data.** [OSMa-Bench](https://github.com/be2rlab/OSMa-Bench) (BE2R Lab, CC BY 4.0), built on ReplicaCAD and HM3D.
