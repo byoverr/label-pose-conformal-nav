@@ -1,0 +1,51 @@
+% ---- Базовая преамбула: XeLaTeX + кириллица ----
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setdefaultlanguage{russian}
+\setotherlanguage{english}
+
+\setmainfont{Times New Roman}[Ligatures=TeX]
+\newfontfamily\cyrillicfont{Times New Roman}[Ligatures=TeX]
+\setsansfont{Arial}[Ligatures=TeX]
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{geometry}
+\geometry{a4paper, top=2cm, bottom=2cm, left=2.5cm, right=1.5cm}
+\usepackage{setspace}
+\linespread{1.0}\selectfont
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{2.2ex plus 0.4ex}{1.2ex plus 0.2ex}
+\titlespacing*{\subsection}{0pt}{1.8ex plus 0.3ex}{0.8ex plus 0.2ex}
+\usepackage{caption}
+\captionsetup{font=small}
+
+\setlength{\parindent}{1.25cm}
+\usepackage{indentfirst}
+
+% Нумерация формул по разделам
+\numberwithin{equation}{section}
+
+% Мягкая вёрстка: убирает выступы строк за поля
+\sloppy
+\emergencystretch=2em
+
+% Токены действий: Times New Roman не содержит малых капителей,
+% поэтому отрисовываем прописными в основном шрифте
+\newcommand{\act}[1]{\mbox{\small #1}}
+
+% ---- Графика и таблицы ----
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds,calc}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{tabularx}
+\usepackage{xltabular}
+\usepackage{array}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\usepackage{float}

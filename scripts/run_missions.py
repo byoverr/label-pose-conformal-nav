@@ -1,8 +1,9 @@
 """Reach-avoid missions with calibrated arms, leave-one-scene-out.
 
 Missions in a scene use arm parameters calibrated on all OTHER scenes (dev excluded), so no
-scene is evaluated with parameters it helped choose; with ~14 scenes this keeps n_cal >= 9,
-the minimum for a finite conformal quantile at alpha = 0.1.
+scene is evaluated with parameters it helped choose; with ~15 scenes this keeps n_cal >= 9,
+the minimum for a finite conformal quantile at alpha = 0.1. Parameters are per avoid class;
+a class whose certificate abstains falls back to geometry (see s2m.missions.keepout).
 Writes results/missions/<scene>.csv (resumable) and results/missions/params_<scene>.csv.
 
 Example: python scripts/run_missions.py --seeds 5 --tasks 20
@@ -15,10 +16,11 @@ from pathlib import Path
 
 import numpy as np
 
-from s2m.analysis import calibrate_arms, load_scores
+from s2m.analysis import ARMS, calibrate_class, load_scores
 from s2m.data import load_scene
 from s2m.drift import simulate
-from s2m.experiment import load_levels, prepare
+from s2m.entities import AVOID_CLASSES, class_ids
+from s2m.experiment import load_levels, prepare, stable_seed
 from s2m.mapping import precompute_observations
 from s2m.missions import make_tasks, run_realization
 from s2m.perception import load_detections
@@ -26,38 +28,27 @@ from s2m.perception import load_detections
 DEV_SCENES = ("apt_0",)
 
 
-def calibrated_params(rows, cal_scenes, levels, alpha, rng):
-    """Arm parameters per level from one random realization of each calibration scene."""
+def calibrated_params(rows, cal_scenes, levels, alpha, rng, cls_ids):
+    """params[level][arm][class_id] and fallback[level][class_id] (pose-only radius)."""
     by = {}
     for r in rows:
         by.setdefault((r["scene"], r["level"]), []).append(r)
-    params = {}
+    params, fallback = {}, {}
     for lv in levels:
         cal = [by[(s, lv)][rng.integers(len(by[(s, lv)]))] for s in cal_scenes]
         cal_L0 = [by[(s, "L0")][0] for s in cal_scenes]
-        params[lv] = calibrate_arms(cal, cal_L0, alpha)
-    return params
+        per_class = {cid: calibrate_class(cal, cal_L0, name, alpha) for name, cid in cls_ids.items()}
+        params[lv] = {arm: {cid: per_class[cid][arm] for cid in per_class} for arm in ARMS}
+        fallback[lv] = {cid: None if per_class[cid]["pose_only"] is None else per_class[cid]["pose_only"].radius
+                        for cid in per_class}
+    return params, fallback
 
 
 def write_csv(path, rows):
     with open(path, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
-
-
-def run_scene(name, idx, params, args, levels):
-    scene = load_scene(args.data / name)
-    setup = prepare(scene, precompute_observations(
-        scene, load_detections(Path("data/cache/detections") / f"{name}.npz")))
-    tasks = make_tasks(setup, args.tasks, seed=0)
-    results = []
-    for lv, model in levels.items():
-        for seed in range(1 if lv == "L0" else args.seeds):
-            est = simulate(scene.poses, model, np.random.default_rng([7, seed, idx]))
-            for r in run_realization(setup, tasks, est, params[lv]):
-                results.append({"scene": name, "level": lv, "seed": seed, **r})
-    return tasks, results
 
 
 if __name__ == "__main__":
@@ -76,17 +67,30 @@ if __name__ == "__main__":
     scenes = sorted({r["scene"] for r in rows})
     args.out.mkdir(parents=True, exist_ok=True)
 
-    for idx, name in enumerate(scenes):
+    for name in scenes:
         out = args.out / f"{name}.csv"
         if out.exists():
             continue
         t = time.time()
-        params = calibrated_params(rows, [s for s in scenes if s != name], levels, args.alpha,
-                                   np.random.default_rng([0, idx]))
+        scene = load_scene(args.data / name)
+        cls_ids = dict(zip(AVOID_CLASSES, class_ids(scene.classes, AVOID_CLASSES)))
+        params, fallback = calibrated_params(rows, [s for s in scenes if s != name], levels,
+                                             args.alpha, np.random.default_rng(stable_seed(0, name)), cls_ids)
         write_csv(args.out / f"params_{name}.csv",
-                  [{"scene": name, "level": lv, "arm": arm,
-                    "lam": "" if p is None else p.lam, "radius": "" if p is None else p.radius}
-                   for lv, arms in params.items() for arm, p in arms.items()])
-        tasks, results = run_scene(name, idx, params, args, levels)
+                  [{"scene": name, "level": lv, "arm": arm, "class": cname,
+                    "lam": "" if p is None else p.lam, "radius": "" if p is None else p.radius,
+                    "fallback_radius": "" if fallback[lv][cid] is None else fallback[lv][cid]}
+                   for lv in levels for arm in ARMS for cname, cid in cls_ids.items()
+                   for p in [params[lv][arm][cid]]])
+
+        setup = prepare(scene, precompute_observations(
+            scene, load_detections(Path("data/cache/detections") / f"{name}.npz")))
+        tasks = make_tasks(setup, args.tasks, seed=0)
+        results = []
+        for lv, model in levels.items():
+            for seed in range(1 if lv == "L0" else args.seeds):
+                est = simulate(scene.poses, model, np.random.default_rng(stable_seed(7, seed, name)))
+                for r in run_realization(setup, tasks, est, params[lv], fallback[lv]):
+                    results.append({"scene": name, "level": lv, "seed": seed, **r})
         write_csv(out, results)
         print(f"{name}: {len(tasks)} tasks, {len(results)} rows, {time.time() - t:.0f} s", flush=True)

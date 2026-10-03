@@ -72,9 +72,32 @@ def _disk(shape, cell, radius, res):
     return dilate(m, radius, res)
 
 
+def keepout(pred, avoid_ids, params: dict[int, ArmParams | None], fallback: dict[int, float | None],
+            res: float) -> np.ndarray | None:
+    """Keep-out cells of one arm, or None if the arm cannot certify the mission.
+
+    A class whose certificate abstains falls back to geometry: every occupied cell may be that
+    class, inflated by the class's pose-only radius. Same rule for every arm.
+    """
+    keep = np.zeros(pred.spec.shape, bool)
+    for k in avoid_ids:
+        p = params[k]
+        if p is not None:
+            keep |= dilate(pred.region(k, p.lam), SAFETY_DISTANCE + p.radius, res)
+        elif fallback.get(k) is not None:
+            keep |= dilate(pred.occupied(), SAFETY_DISTANCE + fallback[k], res)
+        else:
+            return None
+    return keep
+
+
 def run_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,
-                    arms: dict[str, ArmParams | None]) -> list[dict]:
-    """Plan every task with every arm (plus an oracle on the true map) for one drift realization."""
+                    arms: dict[str, dict[int, ArmParams | None]],
+                    fallback: dict[int, float | None]) -> list[dict]:
+    """Plan every task with every arm (plus an oracle on the true map) for one drift realization.
+
+    arms[arm][class_id] = per-class parameters (None = that class's certificate abstains).
+    """
     s, res, shape = setup, setup.spec.res, setup.spec.shape
     D_q = world_correction(est_poses, s.scene.poses)[-1]
 
@@ -95,15 +118,12 @@ def run_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,
     pred = build_map(s.obs, est_poses, s.spec, s.n_classes, "det")
     base = pred.free() & ~dilate(pred.occupied(), ROBOT_RADIUS, res)
 
-    plans = {}
-    for arm, p in arms.items():
-        if p is None:
-            plans[arm] = [None] * len(tasks)
-            continue
-        keep = np.zeros(shape, bool)
-        for k in s.avoid_ids:
-            keep |= dilate(pred.region(k, p.lam), SAFETY_DISTANCE + p.radius, res)
-        plans[arm] = _plan_subset(base & ~keep, starts, goal_masks, valid, res)
+    plans, abstained, fell_back = {}, {}, {}
+    for arm, params in arms.items():
+        keep = keepout(pred, s.avoid_ids, params, fallback, res)
+        abstained[arm] = keep is None
+        fell_back[arm] = sum(params[k] is None for k in s.avoid_ids)
+        plans[arm] = [None] * len(tasks) if keep is None else _plan_subset(base & ~keep, starts, goal_masks, valid, res)
 
     oracle_trav = (truth.free() & ~dilate(truth.occupied(), ROBOT_RADIUS, res)
                    & ~dilate(avoid_true, SAFETY_DISTANCE, res))
@@ -116,7 +136,8 @@ def run_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,
         for arm in plans:
             o = judge(plans[arm][i])
             rows.append({"task": i, "arm": arm,
-                         "abstained": arm != "oracle" and arms[arm] is None,
+                         "abstained": abstained.get(arm, False),
+                         "classes_fell_back": fell_back.get(arm, 0),
                          **asdict(o), "success": o.success, "oracle_length": oracle_len})
     return rows
 

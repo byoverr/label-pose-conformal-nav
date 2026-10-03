@@ -44,6 +44,6 @@ if __name__ == "__main__":
         print(rows[-1], flush=True)
     Path("results/tables").mkdir(parents=True, exist_ok=True)
     with open("results/tables/scene_metrics.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+        w = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
         w.writeheader()
         w.writerows(rows)

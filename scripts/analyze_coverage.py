@@ -1,7 +1,7 @@
-"""Coverage of every calibration arm vs drift level over random scene splits.
+"""Per-class coverage, radius and abstention of every calibration arm vs drift level.
 
-Outputs results/tables/coverage.csv and results/figures/coverage_vs_drift.png,
-results/figures/radius_vs_drift.png.
+Outputs results/tables/coverage.csv, results/figures/coverage_by_class.png and the headline
+figure results/figures/coverage_headline.png.
 
 Example: python scripts/analyze_coverage.py --alpha 0.1 --splits 200
 """
@@ -14,18 +14,27 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from s2m.analysis import ARMS, LAM0, load_scores, run_splits
-from s2m.conformal import coverage_beta_params
-from s2m.viz import ARM_STYLE, MUTED, arm_line, setup
+from s2m.entities import AVOID_CLASSES
+from s2m.viz import MUTED, arm_line, setup
 
 DEV_SCENES = ("apt_0",)
 LEVELS = ("L0", "L1", "L2", "L3", "L4", "L5")
+LEVEL_NOTE = {"L0": "GT", "L1": "0.6 cm", "L2": "3 cm", "L3": "9.5 cm", "L4": "63 cm", "L5": "3.5 m"}
+RADIUS_ARMS = ("label_only", "pose_only", "separate", "joint")
+
+
+def summarise(stats, cls, arm, key, fn):
+    v = np.array(stats[cls][arm][key], float)
+    return float(fn(v)) if np.isfinite(v).any() else np.nan
+
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--scores", type=Path, default=Path("results/scores"))
     ap.add_argument("--alpha", type=float, default=0.1)
     ap.add_argument("--splits", type=int, default=200)
-    ap.add_argument("--n-cal", type=int, default=None, help="default: about 60% of the scenes")
+    ap.add_argument("--n-cal", type=int, default=None, help="default: ~60% of scenes, at least 1/alpha - 1")
+    ap.add_argument("--tag", default="")
     args = ap.parse_args()
 
     rows = load_scores(args.scores, exclude=DEV_SCENES)
@@ -33,63 +42,74 @@ if __name__ == "__main__":
     n_cal = args.n_cal or max(int(np.ceil(1 / args.alpha - 1)), round(0.6 * len(scenes)))
     print(f"{len(scenes)} scenes (dev excluded), n_cal = {n_cal}, alpha = {args.alpha}, lam0 = {LAM0}")
 
-    table, stats = [], {}
-    for level in LEVELS:
-        stats[level] = run_splits(rows, level, args.alpha, n_cal, args.splits)
-        for arm in ARMS:
-            st = stats[level][arm]
-            cov = np.array(st["coverage"], float)
-            table.append({
-                "level": level, "arm": arm,
-                "coverage_mean": np.nanmean(cov) if np.isfinite(cov).any() else np.nan,
-                "coverage_p10": np.nanpercentile(cov, 10) if np.isfinite(cov).any() else np.nan,
-                "abstain_rate": float(np.mean(st["abstain"])),
-                "radius_median": float(np.nanmedian(st["radius"])) if np.isfinite(st["radius"]).any() else np.nan,
-                "lam_median": float(np.nanmedian(st["lam"])) if np.isfinite(st["lam"]).any() else np.nan,
-            })
-
+    stats = {lv: run_splits(rows, lv, args.alpha, n_cal, args.splits) for lv in LEVELS}
+    table = []
+    for lv in LEVELS:
+        for cls in AVOID_CLASSES:
+            for arm in ARMS:
+                table.append({
+                    "level": lv, "class": cls, "arm": arm,
+                    "coverage_mean": summarise(stats[lv], cls, arm, "coverage", np.mean),
+                    "coverage_p10": summarise(stats[lv], cls, arm, "coverage", lambda v: np.percentile(v, 10)),
+                    "abstain_rate": summarise(stats[lv], cls, arm, "abstain", np.mean),
+                    "radius_median": summarise(stats[lv], cls, arm, "radius", np.nanmedian),
+                })
     out = Path("results/tables")
     out.mkdir(parents=True, exist_ok=True)
-    with open(out / "coverage.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(table[0]))
+    with open(out / f"coverage{args.tag}.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(table[0]), lineterminator="\n")
         w.writeheader()
         w.writerows(table)
     for r in table:
-        print(f"{r['level']} {r['arm']:13s} coverage {r['coverage_mean']:.3f} (p10 {r['coverage_p10']:.3f}) "
-              f"abstain {r['abstain_rate']:.2f} radius {r['radius_median']:.2f} lam {r['lam_median']:.2f}")
+        if r["level"] in ("L0", "L2", "L4"):
+            print(f"{r['level']} {r['class']:12s} {r['arm']:12s} cov {r['coverage_mean']:.3f} "
+                  f"(p10 {r['coverage_p10']:.3f}) abstain {r['abstain_rate']:.2f} radius {r['radius_median']:.2f}")
 
     setup()
     x = np.arange(len(LEVELS))
-    a, b = coverage_beta_params(n_cal, args.alpha)
+    xt = [f"{lv}\n{LEVEL_NOTE[lv]}" for lv in LEVELS]
+    fig, axes = plt.subplots(3, len(AVOID_CLASSES), figsize=(10, 8.2), sharex=True)
+    for j, cls in enumerate(AVOID_CLASSES):
+        ax = axes[0, j]
+        ax.axhline(1 - args.alpha, color=MUTED, ls="--", lw=1)
+        for arm in ARMS:
+            arm_line(ax, arm, x, [summarise(stats[lv], cls, arm, "coverage", np.mean) for lv in LEVELS])
+        ax.set_title(cls.replace("_", " "))
+        ax.set_ylim(-0.02, 1.02)
+        ax = axes[1, j]
+        for arm in RADIUS_ARMS:
+            arm_line(ax, arm, x, [summarise(stats[lv], cls, arm, "radius", np.nanmedian) for lv in LEVELS])
+        ax = axes[2, j]
+        for arm in RADIUS_ARMS:
+            arm_line(ax, arm, x, [summarise(stats[lv], cls, arm, "abstain", np.mean) for lv in LEVELS])
+        ax.set_ylim(-0.02, 1.02)
+        ax.set_xticks(x, xt)
+    axes[0, 0].set_ylabel(f"coverage (target {1 - args.alpha:.2f})")
+    axes[1, 0].set_ylabel("keep-out radius, m (median)")
+    axes[2, 0].set_ylabel("abstention rate")
+    for ax in axes[2]:
+        ax.set_xlabel("pose drift level (ATE)")
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=3, bbox_to_anchor=(0.5, -0.04))
+    fig.suptitle(f"Per-class guarantees under pose drift ({len(scenes)} scenes, {args.splits} splits, "
+                 f"n_cal = {n_cal}, α = {args.alpha})")
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    fig.savefig(f"results/figures/coverage_by_class{args.tag}.png")
+
+    # Headline: coverage averaged over the two classes the detector localises reliably.
     fig, ax = plt.subplots(figsize=(6.4, 3.6))
     ax.axhline(1 - args.alpha, color=MUTED, ls="--", lw=1)
-    ax.text(len(LEVELS) - 0.95, 1 - args.alpha + 0.01, f"target 1−α = {1 - args.alpha:.2f}",
+    ax.text(len(LEVELS) - 0.95, 1 - args.alpha + 0.015, f"target 1−α = {1 - args.alpha:.2f}",
             color=MUTED, fontsize=8, ha="right", va="bottom")
-    for arm in ARMS:
-        y = [np.nanmean(stats[lv][arm]["coverage"]) if not np.all(np.isnan(stats[lv][arm]["coverage"]))
-             else np.nan for lv in LEVELS]
+    for arm in ("joint", "separate", "label_only", "pose_only", "uncalibrated"):
+        y = [np.mean([summarise(stats[lv], c, arm, "coverage", np.mean) for c in ("indoor_plant", "bike")])
+             for lv in LEVELS]
         arm_line(ax, arm, x, y)
-    joint = np.array([[np.nanpercentile(stats[lv]["joint"]["coverage"], q) for q in (10, 90)] for lv in LEVELS])
-    ax.fill_between(x, joint[:, 0], joint[:, 1], color=ARM_STYLE["joint"][1], alpha=0.15, lw=0,
-                    label="joint: 10–90% over splits")
-    ax.set_xticks(x, [f"{lv}" for lv in LEVELS])
-    ax.set_xlabel("pose drift level (L0 = ground truth … L5 = stress test)")
-    ax.set_ylabel("test coverage of avoid-class footprints")
+    ax.set_xticks(x, xt)
     ax.set_ylim(-0.02, 1.02)
-    ax.set_title(f"Who keeps the promised coverage under pose drift? ({len(scenes)} ReplicaCAD scenes, "
-                 f"{args.splits} splits)")
+    ax.set_xlabel("pose drift level (ATE)")
+    ax.set_ylabel("test coverage of true footprints")
+    ax.set_title("Indoor plants and bikes: which calibration survives pose drift?")
     ax.legend(loc="lower left", fontsize=7)
-    fig.savefig("results/figures/coverage_vs_drift.png")
-
-    fig, ax = plt.subplots(figsize=(6.4, 3.2))
-    for arm in ("joint", "separate", "bonferroni"):
-        y = [np.nanmedian(stats[lv][arm]["radius"]) if not np.all(np.isnan(stats[lv][arm]["radius"]))
-             else np.nan for lv in LEVELS]
-        arm_line(ax, arm, x, y)
-    ax.set_xticks(x, LEVELS)
-    ax.set_xlabel("pose drift level")
-    ax.set_ylabel("calibrated keep-out radius, m")
-    ax.set_title("Extra keep-out distance chosen by calibration (median over splits)")
-    ax.legend(loc="upper left", fontsize=7)
-    fig.savefig("results/figures/radius_vs_drift.png")
-    print("saved results/tables/coverage.csv and figures")
+    fig.savefig(f"results/figures/coverage_headline{args.tag}.png")
+    print("saved tables and figures")

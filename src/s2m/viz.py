@@ -9,12 +9,12 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 
 ARM_STYLE = {  # arm -> (label, colour, marker); fixed order, never re-assigned by rank
-    "joint": ("joint miss-distance CP (ours)", "#2a78d6", "o"),
+    "joint": ("joint: labels + pose (ours)", "#2a78d6", "o"),
     "uncalibrated": ("uncalibrated map", "#eb6834", "s"),
-    "label_L0": ("label CP, no drift (Sundarsingh-style)", "#1baf7a", "^"),
-    "label_drift": ("label CP, calibrated with drift", "#eda100", "v"),
-    "separate": ("label CP + pose radius (each at α)", "#e87ba4", "D"),
-    "bonferroni": ("label CP + pose radius (α/2 + α/2)", "#008300", "P"),
+    "label_only": ("labels only (no drift in calibration)", "#1baf7a", "^"),
+    "pose_only": ("pose only (GT labels)", "#eda100", "v"),
+    "separate": ("labels + pose, separate quantiles", "#e87ba4", "D"),
+    "label_cell": ("per-cell label CP (Sundarsingh-style)", "#008300", "P"),
     "oracle": ("oracle (true map)", "#52514e", "x"),
 }
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"

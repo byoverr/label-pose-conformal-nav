@@ -12,6 +12,7 @@ over random scene splits, in the analysis step.
 
 from __future__ import annotations
 
+import zlib
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,7 +25,7 @@ from s2m.entities import AVOID_CLASSES, GOAL_CLASSES, Entity, class_ids, extract
 from s2m.grid import GridSpec
 from s2m.mapping import FrameObs, Map, build_map, fixed_spec, floor_class_ids
 
-LAMBDAS = np.round(np.arange(0.0, 1.0001, 0.01), 2)  # label thresholds evaluated for the pred map
+LAMBDAS = np.round(np.arange(0.0, 0.5001, 0.01), 2)  # map thresholds evaluated for the pred map
 R_MAX = 3.0  # metres; a larger miss means the class is effectively missing from the map
 
 
@@ -78,18 +79,22 @@ def realization_scores(setup: SceneSetup, est_poses: np.ndarray) -> dict:
     pred = build_map(s.obs, est_poses, s.spec, s.n_classes, "det")
     gtlab = build_map(s.obs, est_poses, s.spec, s.n_classes, "gt", floor_class_ids(s.scene))
 
-    row = {
-        "ate": ate(est_poses, gt_poses),
-        "endpoint_drift": endpoint_drift(est_poses, gt_poses),
-        "n_entities": len(ents),
-        "label_score": label_score(pred, ents),
-        "miss_gtlab": miss_distance({k: gtlab.class_mass[:, :, k] >= 2 for k in s.avoid_ids},
-                                    ents, s.spec.res, R_MAX),
-    }
-    for lam in LAMBDAS:
-        regions = {k: pred.region(k, lam) for k in s.avoid_ids}
-        row[f"miss_pred_{lam:.2f}"] = miss_distance(regions, ents, s.spec.res, R_MAX)
+    row = {"ate": ate(est_poses, gt_poses), "endpoint_drift": endpoint_drift(est_poses, gt_poses)}
+    # Per avoid class (a scene without that class scores 0: nothing to miss).
+    for k in s.avoid_ids:
+        name = s.scene.classes[k]
+        ek = [e for e in ents if e.cls == k]
+        row[f"n_ent_{name}"] = len(ek)
+        row[f"label_score_{name}"] = label_score(pred, ek)
+        row[f"miss_gtlab_{name}"] = miss_distance({k: gtlab.class_mass[:, :, k] >= 2}, ek, s.spec.res, R_MAX)
+        for lam in LAMBDAS:
+            row[f"miss_pred_{name}_{lam:.2f}"] = miss_distance({k: pred.region(k, lam)}, ek, s.spec.res, R_MAX)
     return row
+
+
+def stable_seed(*parts) -> list[int]:
+    """Seed sequence independent of Python's per-process string hashing."""
+    return [p if isinstance(p, int) else zlib.crc32(str(p).encode()) for p in parts]
 
 
 def scene_rows(setup: SceneSetup, levels: dict[str, DriftModel], seeds: int, base_seed: int = 0):
@@ -97,6 +102,6 @@ def scene_rows(setup: SceneSetup, levels: dict[str, DriftModel], seeds: int, bas
     for level, model in levels.items():
         n = 1 if level == "L0" else seeds  # L0 is deterministic
         for seed in range(n):
-            rng = np.random.default_rng([base_seed, seed, abs(hash(setup.scene.name)) % 2**31])
+            rng = np.random.default_rng(stable_seed(base_seed, seed, setup.scene.name))
             est = simulate(gt, model, rng)
             yield {"scene": setup.scene.name, "level": level, "seed": seed, **realization_scores(setup, est)}

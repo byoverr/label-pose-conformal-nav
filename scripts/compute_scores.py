@@ -38,7 +38,7 @@ if __name__ == "__main__":
         setup = prepare(scene, precompute_observations(scene, load_detections(det_path)))
         rows = list(scene_rows(setup, levels, args.seeds))
         with open(out, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0]))
+            w = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
             w.writeheader()
             w.writerows(rows)
         print(f"{scene.name}: {len(setup.entities)} avoid entities, {len(rows)} rows, {time.time() - t:.0f} s")
