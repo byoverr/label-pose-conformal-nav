@@ -41,17 +41,22 @@ def download_scene(scene: str, out_dir: Path, step: int = 8, workers: int = 8) -
                  for i in range(0, n_frames, step)
                  for prefix, ext in (("frame", "jpg"), ("depth", "png"), ("semantic", "png"))]
     with ThreadPoolExecutor(workers) as pool:
-        list(pool.map(lambda p: _fetch(p, out_dir), rel_paths))
+        ok = list(pool.map(lambda p: _fetch(p, out_dir), rel_paths))
+    failed = [p for p, good in zip(rel_paths, ok) if not good]
+    if failed:  # re-running the download skips existing files, so this is recoverable
+        print(f"{scene}: {len(failed)} files failed, e.g. {failed[0]}")
     return scene_dir
 
 
-def _fetch(rel_path: str, out_dir: Path, retries: int = 3) -> None:
+def _fetch(rel_path: str, out_dir: Path, retries: int = 6) -> bool:
+    """Download one file; returns False instead of raising after the last retry."""
     import time
+    import urllib.error
     import urllib.request
 
     target = Path(out_dir) / rel_path
     if target.exists():
-        return
+        return True
     target.parent.mkdir(parents=True, exist_ok=True)
     url = f"{BASE_URL}/{SCENE_ROOT}/{rel_path}"
     for attempt in range(retries):
@@ -61,11 +66,10 @@ def _fetch(rel_path: str, out_dir: Path, retries: int = 3) -> None:
             tmp = target.with_suffix(target.suffix + ".part")
             tmp.write_bytes(data)
             tmp.replace(target)  # never leave half-written files under the final name
-            return
-        except Exception:
-            if attempt == retries - 1:
-                raise
-            time.sleep(5 * (attempt + 1))
+            return True
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError):
+            time.sleep(min(60, 5 * 2 ** attempt))
+    return False
 
 
 @dataclass

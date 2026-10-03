@@ -1,0 +1,11 @@
+# Drift levels calibrated once on apt_0 (path 33.7 m) with s2m.drift.calibrate_level and then
+# applied unchanged to every scene: the noise parameters describe the pose estimator, not the scene.
+# Targets follow published magnitudes (see docs/drift_protocol.md).
+reference_scene: apt_0
+levels:
+  L0: {sigma_t: 0.0,    sigma_yaw_rot: 0.0,    sigma_yaw_trans: 0.0}     # ground-truth poses
+  L1: {sigma_t: 0.0027, sigma_yaw_rot: 0.0027, sigma_yaw_trans: 0.0005}  # ATE ~0.6 cm  (dense RGB-D SLAM on synthetic data)
+  L2: {sigma_t: 0.0135, sigma_yaw_rot: 0.0135, sigma_yaw_trans: 0.0027}  # ATE ~3 cm    (real RGB-D SLAM, TUM)
+  L3: {sigma_t: 0.0423, sigma_yaw_rot: 0.0423, sigma_yaw_trans: 0.0085}  # ATE ~9.5 cm  (hard scenes, ScanNet)
+  L4: {sigma_t: 0.2831, sigma_yaw_rot: 0.2831, sigma_yaw_trans: 0.0566}  # ~3% of path  (odometry without loop closure)
+  L5: {sigma_t: 1.7469, sigma_yaw_rot: 1.7469, sigma_yaw_trans: 0.3494}  # ~16% of path (stress test)
