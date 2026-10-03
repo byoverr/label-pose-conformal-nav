@@ -5,6 +5,9 @@ A task = start point + goal point on the floor. Two task families:
            but the shortest obstacle-free path between them passes within SAFETY_DISTANCE of an
            avoid object. A safe detour exists; a planner that under-estimates the object's
            footprint cuts the corner and violates. This is the situation the guarantee is for.
+  random:  same start/goal rules as pass_by, any pair connected in the true map; no requirement that
+           the path comes near an avoid object. The unselected task mix, for comparison with
+           published mission success rates.
   approach: goals 0.7-1.2 m from an avoid object ("drive to the sofa next to the plant"). Kept
            for reference: once the calibrated keep-out exceeds 1.2 m the goal itself becomes
            forbidden, so these tasks mostly measure how close a certificate lets the robot get.
@@ -77,7 +80,8 @@ def make_tasks(setup: SceneSetup, n: int, seed: int = 0, kind: str = "pass_by") 
             continue
         paths = plan_many(trav, [a for a, _ in batch], [_disk(s.spec.shape, b, 0.0, res) for _, b in batch], res)
         for (a, b), path in zip(batch, paths):
-            if path is not None and d_avoid[path[:, 0], path[:, 1]].min() < SAFETY_DISTANCE and len(tasks) < n:
+            grazes = path is not None and d_avoid[path[:, 0], path[:, 1]].min() < SAFETY_DISTANCE
+            if path is not None and (grazes or kind == "random") and len(tasks) < n:
                 tasks.append(Task(to_xz(a), to_xz(b)))
     return tasks
 

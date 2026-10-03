@@ -77,6 +77,8 @@ if __name__ == "__main__":
     ap.add_argument("--vo-cache", type=Path, default=Path("data/cache/vo"))
     ap.add_argument("--only", nargs="*", default=None, help="run only these levels")
     ap.add_argument("--masks", type=Path, default=None, help="cached SAM masks (default: box + depth)")
+    ap.add_argument("--detections", type=Path, default=Path("data/cache/detections"))
+    ap.add_argument("--kind", default="pass_by", choices=["pass_by", "random", "approach"], help="task family")
     args = ap.parse_args()
 
     levels = {lv: m for lv, m in load_levels(args.levels).items() if args.only is None or lv in args.only}
@@ -108,8 +110,8 @@ if __name__ == "__main__":
 
         masks = None if args.masks is None else load_masks(args.masks / f"{name}.npz")
         setup = prepare(scene, precompute_observations(
-            scene, load_detections(Path("data/cache/detections") / f"{name}.npz"), masks=masks), args.avoid)
-        tasks = make_tasks(setup, args.tasks, seed=0)
+            scene, load_detections(args.detections / f"{name}.npz"), masks=masks), args.avoid)
+        tasks = make_tasks(setup, args.tasks, seed=0, kind=args.kind)
         results = []
         for lv, model in levels.items():
             for seed in range(1 if lv == "L0" else args.seeds):

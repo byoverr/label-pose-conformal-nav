@@ -156,10 +156,36 @@ def variants_table():
     (OUT / "variants.tex").write_text("\n".join(lines) + "\n")
 
 
+def comparison_table():
+    path = Path("results/tables/comparison.csv")
+    if not path.exists():
+        return
+    rows = list(csv.DictReader(open(path)))
+    setting_ru = {"closed": "их: 5 классов, 95\\,\\%", "open": "наши: 98 подсказок, 90\\,\\%"}
+    lines = ["\\begin{tabular}{ll|ccc|ccc|cc|c}", "\\toprule",
+             "Условия & Дрейф & \\multicolumn{3}{c|}{покадровая CP меток} & \\multicolumn{3}{c|}{\\textbf{совместно}} & "
+             "\\multicolumn{2}{c|}{без калибровки} & оракул \\\\",
+             " & & покр. & успех & опасно & покр. & успех & опасно & успех & опасно & успех \\\\", "\\midrule"]
+    for setting in ("closed", "open"):
+        levels = [lv for lv in ("L0", "L2", "L3", "L4") if any(r["setting"] == setting and r["level"] == lv for r in rows)]
+        for i, lv in enumerate(levels):
+            g = lambda arm, key: next(r[key] for r in rows if r["setting"] == setting and r["level"] == lv and r["arm"] == arm)
+            cov = lambda arm: fmt(min(float(g(arm, "coverage_bike")), float(g(arm, "coverage_indoor_plant"))))
+            cells = [setting_ru[setting] if i == 0 else "", "известна" if lv == "L0" else lv,
+                     cov("label_cell"), fmt(g("label_cell", "success")), fmt(g("label_cell", "violation"), 3),
+                     cov("joint"), fmt(g("joint", "success")), fmt(g("joint", "violation"), 3),
+                     fmt(g("uncalibrated", "success")), fmt(g("uncalibrated", "violation"), 3), fmt(g("oracle", "success"))]
+            lines.append(" & ".join(cells) + " \\\\")
+        lines.append("\\midrule" if setting == "closed" else "\\bottomrule")
+    lines.append("\\end{tabular}")
+    (OUT / "comparison.tex").write_text("\n".join(lines) + "\n")
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     coverage_table()
     alpha_table()
+    comparison_table()
     variants_table()
     for tag in ("", "_pb"):
         missions_table(tag)

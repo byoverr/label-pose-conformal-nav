@@ -41,7 +41,9 @@ class OpenVocabDetector:
     """Thin wrapper around Ultralytics YOLO-World with a fixed text vocabulary."""
 
     def __init__(self, vocabulary: dict[int, str], weights: str = "models/yolov8s-worldv2.pt",
-                 device: str | None = None, conf: float = 0.05):
+                 device: str | None = None, conf: float = 0.05, subset: list[int] | None = None):
+        """`subset`: dataset class ids to keep (a closed vocabulary drawn from `vocabulary`). The text
+        embeddings of the other prompts are dropped, which is what set_classes(subset) would compute."""
         import torch
         from ultralytics import YOLOWorld
 
@@ -58,6 +60,14 @@ class OpenVocabDetector:
             self.model.set_classes(list(vocabulary.values()))
             self.model.model.clip_model = None  # keep the embeddings, drop the text encoder
             self.model.save(str(baked))
+        if subset is not None:
+            keys = list(vocabulary)
+            idx = [keys.index(k) for k in subset]
+            world = self.model.model
+            world.txt_feats = world.txt_feats[:, idx]
+            world.model[-1].nc = len(idx)
+            world.names = {i: vocabulary[k] for i, k in enumerate(subset)}
+            self.ids = np.array(subset, dtype=np.int32)
 
     def __call__(self, rgb: np.ndarray) -> Detections:
         bgr = np.ascontiguousarray(rgb[:, :, ::-1])  # Ultralytics expects OpenCV-style BGR arrays
