@@ -1,16 +1,18 @@
 """Sampling-based planners on calibrated (tightened) maps: solved-within-budget vs inflation.
 
-Reads results/tables/planner_bridge*.csv (parts are concatenated); writes
-results/tables/planner_bridge_summary.csv and results/figures/planner_bridge.png.
+Reads results/tables/planner_bridge<tag>_<part>.csv (parts are concatenated); writes
+results/tables/planner_bridge<tag>_summary.csv and results/figures/planner_bridge<tag>.png.
+
+Example: python scripts/analyze_bridge.py --tag _pb
 """
 
 import argparse
-import csv
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from s2m.io import read_csv, write_csv
 from s2m.viz import INK, MUTED, setup
 
 PLANNERS = {"rrt_connect": ("RRT-Connect, uniform sampling", "#eb6834", "s"),
@@ -22,7 +24,10 @@ if __name__ == "__main__":
     ap.add_argument("--tag", default="", help="'' for all avoid classes, '_pb' for plant + bike")
     args = ap.parse_args()
     rows = [r for p in sorted(Path("results/tables").glob(f"planner_bridge{args.tag}_[0-9]*.csv"))
-            for r in csv.DictReader(open(p))]
+            for r in read_csv(p)]
+    if not rows:
+        raise SystemExit(f"no results/tables/planner_bridge{args.tag}_<part>.csv files; run scripts/run_planner_bridge.py")
+    budget = max(int(r["budget"]) for r in rows if r.get("budget"))
     scales = sorted({float(r["scale"]) for r in rows})
     summary = []
     for m in scales:
@@ -42,14 +47,11 @@ if __name__ == "__main__":
             entry[f"{pl}_time_median_s"] = float(np.median(ts)) if ts else np.nan
         summary.append(entry)
         print(entry)
-    with open(f"results/tables/planner_bridge{args.tag}_summary.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(summary[0]), lineterminator="\n")
-        w.writeheader()
-        w.writerows(summary)
+    write_csv(f"results/tables/planner_bridge{args.tag}_summary.csv", summary)
 
     # Anytime view: a run stops at its first solution, so "solved within budget B" is
-    # iterations <= B for every B below the 1500-extension budget actually used.
-    budgets = np.unique(np.round(np.logspace(0, np.log10(1500), 40)).astype(int))
+    # iterations <= B for every B below the budget actually used.
+    budgets = np.unique(np.round(np.logspace(0, np.log10(budget), 40)).astype(int))
     ref_scale = 1.0 if 1.0 in scales else scales[-1]
 
     setup()

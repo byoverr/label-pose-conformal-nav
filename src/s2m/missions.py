@@ -8,11 +8,10 @@ A task = start point + goal point on the floor. Two task families:
   random:  same start/goal rules as pass_by, any pair connected in the true map; no requirement that
            the path comes near an avoid object. The unselected task mix, for comparison with
            published mission success rates.
-  approach: goals 0.7-1.2 m from an avoid object ("drive to the sofa next to the plant"). Kept
-           for reference: once the calibrated keep-out exceeds 1.2 m the goal itself becomes
-           forbidden, so these tasks mostly measure how close a certificate lets the robot get.
 Goals are geometric on purpose: the guarantee studied here is about avoid classes, and
-semantic goal errors would confound it.
+semantic goal errors would confound it. The goal is handed to the planner in its own frame, so a
+found path always ends at the goal: "success" means a path was found and it is safe
+(no violation of the avoid-class distance, no collision with a true obstacle).
 
 The planner sees only the drifted predicted map; every calibration arm turns that map into
 keep-out zones (avoid-class region at threshold lam, dilated by SAFETY_DISTANCE + arm radius).
@@ -34,10 +33,11 @@ from s2m.mapping import build_map, floor_class_ids
 from s2m.planning import ROBOT_RADIUS, SAFETY_DISTANCE, dilate, evaluate_path, plan_many
 
 GOAL_TOL = 0.3  # metres: reaching the goal = ending this close to the goal point
-GOAL_BAND = (SAFETY_DISTANCE + 0.2, SAFETY_DISTANCE + 0.7)  # goal distance to an avoid object
 MIN_START_GOAL = 3.0  # metres between start and goal
 CLEAR = ROBOT_RADIUS + 0.1  # start/goal clearance from any obstacle
-START_GOAL_CLEAR = 1.5  # pass_by: start/goal distance to every avoid object (> d + typical radius)
+START_GOAL_CLEAR = 1.5  # start/goal distance to every avoid object (> d + typical radius)
+MAX_BATCHES = 80  # task sampling gives up after this many batches (small or cluttered scenes)
+MAX_DRAWS_PER_BATCH = 100_000
 
 
 @dataclass
@@ -56,29 +56,29 @@ def make_tasks(setup: SceneSetup, n: int, seed: int = 0, kind: str = "pass_by") 
     xs, zs = s.spec.cell_centers()
     to_xz = lambda rc: (float(xs[rc[1]]), float(zs[rc[0]]))
 
-    if kind == "approach":
-        goals = np.argwhere(roomy & (d_avoid >= GOAL_BAND[0]) & (d_avoid <= GOAL_BAND[1]))
-        starts = np.argwhere(roomy & (d_avoid > GOAL_BAND[0]))
-    else:
-        goals = starts = np.argwhere(roomy & (d_avoid >= START_GOAL_CLEAR))
-    if len(goals) == 0 or len(starts) == 0:
+    if kind not in ("pass_by", "random"):
+        raise ValueError(f"unknown task kind {kind!r}")
+    goals = starts = np.argwhere(roomy & (d_avoid >= START_GOAL_CLEAR))
+    if len(goals) < 2:
         return []
 
-    # pass_by: keep pairs whose shortest obstacle-only path grazes an avoid object
+    # random: any pair connected in the true map; pass_by: only pairs whose shortest
+    # obstacle-only path grazes an avoid object
     trav = s.truth.free() & ~dilate(s.truth.occupied(), ROBOT_RADIUS, res)
     tasks = []
-    for _ in range(80):
+    for _ in range(MAX_BATCHES):
         if len(tasks) == n:
             break
         batch = []
-        while len(batch) < 2 * n:
+        for _ in range(MAX_DRAWS_PER_BATCH):  # bounded: a tiny scene may have no pair MIN_START_GOAL apart
+            if len(batch) == 2 * n:
+                break
             g, st = goals[rng.integers(len(goals))], starts[rng.integers(len(starts))]
             if np.hypot(*(g - st)) * res >= MIN_START_GOAL:
                 batch.append((tuple(st), tuple(g)))
-        if kind == "approach":
-            tasks += [Task(to_xz(a), to_xz(b)) for a, b in batch][: n - len(tasks)]
-            continue
-        paths = plan_many(trav, [a for a, _ in batch], [_disk(s.spec.shape, b, 0.0, res) for _, b in batch], res)
+        if not batch:
+            break
+        paths = plan_many(trav, [a for a, _ in batch], [disk(s.spec.shape, b, 0.0, res) for _, b in batch], res)
         for (a, b), path in zip(batch, paths):
             grazes = path is not None and d_avoid[path[:, 0], path[:, 1]].min() < SAFETY_DISTANCE
             if path is not None and (grazes or kind == "random") and len(tasks) < n:
@@ -86,14 +86,15 @@ def make_tasks(setup: SceneSetup, n: int, seed: int = 0, kind: str = "pass_by") 
     return tasks
 
 
-def _to_cell(spec, xz, D):
+def to_cell(spec, xz, D):
     """GT-world point -> cell of the planner frame (moved by the query-time correction D)."""
     p = D[:3, :3] @ np.array([xz[0], 0.0, xz[1]]) + D[:3, 3]
     r, c, inside = spec.to_cell(np.array([p[0]]), np.array([p[2]]))
     return (int(r[0]), int(c[0])) if inside[0] else None
 
 
-def _disk(shape, cell, radius, res):
+def disk(shape, cell, radius, res):
+    """Cells within `radius` metres of one cell."""
     m = np.zeros(shape, bool)
     m[cell] = True
     return dilate(m, radius, res)
@@ -136,11 +137,11 @@ def run_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,
         avoid_true |= e.mask(shape)
     d_avoid, d_obst = distance_to(avoid_true, res), distance_to(truth.occupied(), res)
 
-    cells = [(_to_cell(s.spec, t.start_xz, D_q), _to_cell(s.spec, t.goal_xz, D_q)) for t in tasks]
+    cells = [(to_cell(s.spec, t.start_xz, D_q), to_cell(s.spec, t.goal_xz, D_q)) for t in tasks]
     valid = [i for i, (a, b) in enumerate(cells) if a is not None and b is not None]
     starts = [cells[i][0] if i in valid else None for i in range(len(tasks))]
-    goal_masks = [_disk(shape, cells[i][1], GOAL_TOL, res) if i in valid else None for i in range(len(tasks))]
-    d_goal = {i: distance_to(_disk(shape, cells[i][1], 0.0, res), res) for i in valid}
+    goal_masks = [disk(shape, cells[i][1], GOAL_TOL, res) if i in valid else None for i in range(len(tasks))]
+    d_goal = {i: distance_to(disk(shape, cells[i][1], 0.0, res), res) for i in valid}
 
     pred = build_map(s.obs, est_poses, s.spec, s.n_classes, "det")
     base = pred.free() & ~dilate(pred.occupied(), ROBOT_RADIUS, res)

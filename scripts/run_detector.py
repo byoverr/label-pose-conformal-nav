@@ -2,7 +2,7 @@
 
 Example: python scripts/run_detector.py data/replica_cad/apt_0 --limit 50   # speed check
          python scripts/run_detector.py data/replica_cad/* --closed indoor_plant bike tv_stand sofa table \
-                --cache data/cache/detections_closed5     # closed 5-class vocabulary (Sundarsingh et al. setting)
+                --detections data/cache/detections_closed5     # closed 5-class vocabulary (Sundarsingh et al. setting)
 """
 
 import argparse
@@ -15,7 +15,7 @@ from s2m.perception import OpenVocabDetector, object_vocabulary, save_detections
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("scene_dirs", type=Path, nargs="+")
-    ap.add_argument("--cache", type=Path, default=Path("data/cache/detections"))
+    ap.add_argument("--detections", type=Path, default=Path("data/cache/detections"), help="output directory")
     ap.add_argument("--limit", type=int, default=None, help="only the first N frames (speed check)")
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--closed", nargs="+", default=None, help="closed vocabulary: keep only these class names")
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     detector = None
     for scene_dir in args.scene_dirs:
         scene = load_scene(scene_dir)
-        out = args.cache / f"{scene.name}.npz"
+        out = args.detections / f"{scene.name}.npz"
         if out.exists() and not args.overwrite and args.limit is None:
             print(f"{scene.name}: cached")
             continue

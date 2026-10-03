@@ -1,9 +1,9 @@
 """Reach-avoid missions with calibrated arms, leave-one-scene-out.
 
 Missions in a scene use arm parameters calibrated on all OTHER scenes (dev excluded), so no
-scene is evaluated with parameters it helped choose; with ~15 scenes this keeps n_cal >= 9,
-the minimum for a finite conformal quantile at alpha = 0.1. Parameters are per avoid class;
-a class whose certificate abstains falls back to geometry (see s2m.missions.keepout).
+scene is evaluated with parameters it helped choose (n_cal = 20 of the 21 evaluation scenes).
+Parameters are per avoid class; a class whose certificate abstains falls back to geometry
+(see s2m.missions.keepout). Task families: pass_by (hard, selected) and random (unselected).
 Writes results/missions/<scene>.csv (resumable) and results/missions/params_<scene>.csv.
 
 Pose error comes from the synthetic drift levels and, with --vo, from the cached real visual
@@ -15,51 +15,24 @@ Example: python scripts/run_missions.py --seeds 5 --tasks 20
 """
 
 import argparse
-import csv
 import time
 from pathlib import Path
 
 import numpy as np
 
-from s2m.analysis import ARMS, calibrate_class, load_scores
+from s2m.analysis import ARMS, calibrated_params, load_scores
 from s2m.data import load_scene
 from s2m.drift import simulate
 from s2m.entities import AVOID_CLASSES, class_ids
 from s2m.experiment import load_levels, prepare, stable_seed
+from s2m.io import DEV_SCENES, write_csv
 from s2m.mapping import precompute_observations
 from s2m.missions import make_tasks, run_realization
 from s2m.odometry import vo_poses
 from s2m.perception import load_detections, load_masks
 
-DEV_SCENES = ("apt_0",)
-
-
-def calibrated_params(rows, cal_scenes, levels, alpha, rng, cls_ids):
-    """params[level][arm][class_id] and fallback[level][class_id] (pose-only radius)."""
-    by = {}
-    for r in rows:
-        by.setdefault((r["scene"], r["level"]), []).append(r)
-    params, fallback = {}, {}
-    for lv in levels:
-        cal = [by[(s, lv)][rng.integers(len(by[(s, lv)]))] for s in cal_scenes]
-        cal_L0 = [by[(s, "L0")][0] for s in cal_scenes]
-        per_class = {cid: calibrate_class(cal, cal_L0, name, alpha) for name, cid in cls_ids.items()}
-        params[lv] = {arm: {cid: per_class[cid][arm] for cid in per_class} for arm in ARMS}
-        fallback[lv] = {cid: None if per_class[cid]["pose_only"] is None else per_class[cid]["pose_only"].radius
-                        for cid in per_class}
-    return params, fallback
-
-
 MISSION_FIELDS = ["scene", "level", "seed", "task", "arm", "abstained", "classes_fell_back", "planned",
                   "violation", "collision", "reached", "length", "success", "oracle_length"]
-
-
-def write_csv(path, rows, fields=None):
-    """Header-only file when there are no rows (e.g. a scene without valid tasks): resumable runs skip it."""
-    with open(path, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=fields or list(rows[0]), lineterminator="\n")
-        w.writeheader()
-        w.writerows(rows)
 
 
 if __name__ == "__main__":
@@ -78,7 +51,7 @@ if __name__ == "__main__":
     ap.add_argument("--only", nargs="*", default=None, help="run only these levels")
     ap.add_argument("--masks", type=Path, default=None, help="cached SAM masks (default: box + depth)")
     ap.add_argument("--detections", type=Path, default=Path("data/cache/detections"))
-    ap.add_argument("--kind", default="pass_by", choices=["pass_by", "random", "approach"], help="task family")
+    ap.add_argument("--kind", default="pass_by", choices=["pass_by", "random"], help="task family")
     args = ap.parse_args()
 
     levels = {lv: m for lv, m in load_levels(args.levels).items() if args.only is None or lv in args.only}

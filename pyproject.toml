@@ -1,7 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "s2m"
-version = "0.1.0"
+version = "0.2.0"
+description = "Joint conformal calibration of open-vocabulary semantic maps under label and pose errors"
 requires-python = ">=3.10"
+# exact versions used for the reported results: requirements.txt
+dependencies = ["numpy", "scipy", "matplotlib", "pillow", "pyyaml", "torch", "ultralytics", "open3d"]
+
+[project.optional-dependencies]
+test = ["pytest"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

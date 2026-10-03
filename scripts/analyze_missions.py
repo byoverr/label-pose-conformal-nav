@@ -1,39 +1,26 @@
 """Mission outcomes per arm and drift level, plus H4 (map mIoU vs mission safety).
 
-Reads results/missions/*.csv and results/tables/scene_metrics.csv; writes
-results/tables/missions.csv, results/figures/missions_vs_drift.png, results/figures/miou_vs_violations.png.
+Reads a results/missions*/ directory and results/tables/scene_metrics.csv; writes
+results/tables/missions<tag>.csv, results/figures/missions_vs_drift<tag>.png and (unless --no-h4)
+results/figures/miou_vs_violations<tag>.png, results/tables/h4_spearman<tag>.txt.
+
+Example: python scripts/analyze_missions.py --dir results/missions_pb --tag _pb
+         python scripts/analyze_missions.py --dir results/missions_pb_vo --tag _pb_vo --levels L0 VO2 VO4 \
+                --scores results/scores results/scores_vo --no-h4
 """
 
 import argparse
-import csv
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.stats import spearmanr
 
+from s2m.analysis import load_scores
+from s2m.io import DEV_SCENES, LEVELS, level_labels, mission_rows, rate, read_csv, write_csv
 from s2m.viz import arm_line, setup
 
-LEVELS = ("L0", "L1", "L2", "L3", "L4", "L5")
-LEVEL_NOTE = {"L0": "GT", "L1": "0.6 cm", "L2": "3 cm", "L3": "9.5 cm", "L4": "63 cm", "L5": "3.5 m",
-              "VO2": "VO, 2nd fr.", "VO4": "VO, 4th fr."}
 ARMS = ("joint", "separate", "label_only", "pose_only", "uncalibrated", "label_cell", "oracle")
-
-
-def as_bool(v):
-    return v in ("True", "true", "1", True)
-
-
-def load(paths):
-    rows = []
-    for p in paths:
-        for r in csv.DictReader(open(p)):
-            rows.append(r)
-    return rows
-
-
-def rate(rs, key):
-    return float(np.mean([as_bool(r[key]) for r in rs])) if rs else np.nan
 
 
 if __name__ == "__main__":
@@ -41,17 +28,20 @@ if __name__ == "__main__":
     ap.add_argument("--dir", type=Path, default=Path("results/missions"))
     ap.add_argument("--tag", default="", help="suffix for output files, e.g. _pb")
     ap.add_argument("--levels", nargs="+", default=list(LEVELS))
+    ap.add_argument("--scores", type=Path, nargs="+", default=[Path("results/scores")],
+                    help="score files, only used to label drift levels by their median ATE")
     ap.add_argument("--no-h4", action="store_true", help="skip the mIoU vs violations analysis")
     args = ap.parse_args()
     LEVELS = tuple(args.levels)
-    rows = load(sorted(p for p in args.dir.glob("*.csv") if not p.name.startswith("params_")))
+    rows = mission_rows(args.dir)
+    note = level_labels([r for d in args.scores for r in load_scores(d, exclude=DEV_SCENES)])
     print(f"{len(rows)} mission rows from {len({r['scene'] for r in rows})} scenes")
 
     table = []
     for lv in LEVELS:
         for arm in ARMS:
             rs = [r for r in rows if r["level"] == lv and r["arm"] == arm]
-            planned = [r for r in rs if as_bool(r["planned"])]
+            planned = [r for r in rs if r["planned"] == "True"]
             ratio = [float(r["length"]) / float(r["oracle_length"]) for r in planned
                      if r["oracle_length"] not in ("", "nan") and np.isfinite(float(r["oracle_length"]))]
             table.append({
@@ -62,11 +52,7 @@ if __name__ == "__main__":
                 "violation_given_planned": rate(planned, "violation"),
                 "length_ratio_median": float(np.median(ratio)) if ratio else np.nan,
             })
-    Path("results/tables").mkdir(parents=True, exist_ok=True)
-    with open(f"results/tables/missions{args.tag}.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(table[0]), lineterminator="\n")
-        w.writeheader()
-        w.writerows(table)
+    write_csv(f"results/tables/missions{args.tag}.csv", table)
     for t in table:
         print(f"{t['level']} {t['arm']:12s} plan {t['planned']:.2f} viol {t['violation']:.3f} "
               f"(|plan {t['violation_given_planned']:.3f}) coll {t['collision']:.3f} succ {t['success']:.2f} "
@@ -74,7 +60,7 @@ if __name__ == "__main__":
 
     setup()
     x = np.arange(len(LEVELS))
-    xt = [f"{lv}\n{LEVEL_NOTE[lv]}" for lv in LEVELS]
+    xt = [f"{lv}\n{note.get(lv, '')}" for lv in LEVELS]
     fig, axes = plt.subplots(1, 3, figsize=(11, 3.6))
     for arm in ARMS:
         get = lambda k: [next(t[k] for t in table if t["level"] == lv and t["arm"] == arm) for lv in LEVELS]
@@ -84,7 +70,7 @@ if __name__ == "__main__":
     for ax, title in zip(axes, ("violations among planned paths", "mission success", "path found")):
         ax.set_title(title)
         ax.set_xticks(x, xt)
-        ax.set_xlabel("pose drift level (ATE)")
+        ax.set_xlabel("pose error (median ATE over scenes)")
         ax.set_ylim(-0.02, 1.02)
     axes[0].set_ylabel("fraction of tasks")
     handles, labels = axes[1].get_legend_handles_labels()
@@ -95,11 +81,11 @@ if __name__ == "__main__":
     if args.no_h4:
         raise SystemExit
     # H4: map quality (mIoU at GT poses) vs safety of the uncalibrated planner at GT poses.
-    metrics = {r["scene"]: r for r in csv.DictReader(open("results/tables/scene_metrics.csv"))}
+    metrics = {r["scene"]: r for r in read_csv("results/tables/scene_metrics.csv")}
     pts = []
     for scene in sorted({r["scene"] for r in rows}):
         rs = [r for r in rows if r["scene"] == scene and r["level"] == "L0" and r["arm"] == "uncalibrated"
-              and as_bool(r["planned"])]
+              and r["planned"] == "True"]
         if rs and scene in metrics:
             pts.append((float(metrics[scene]["miou"]), float(metrics[scene]["avoid_iou"]), rate(rs, "violation")))
     pts = np.array(pts)

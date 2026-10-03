@@ -41,5 +41,5 @@ def test_evaluate_path_flags_violation():
     far = np.full((10, 10), 5.0)
     goal = np.full((10, 10), 5.0)
     goal[5, 9] = 0.0
-    out = evaluate_path(path, avoid, far, goal, res=0.05)
+    out = evaluate_path(path, avoid, far, goal, res=0.05, reach=0.6)
     assert out.planned and out.violation and out.reached and not out.success

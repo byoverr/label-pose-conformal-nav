@@ -8,7 +8,6 @@ Example: python scripts/compute_scores.py data/replica_cad/* --seeds 10
 """
 
 import argparse
-import csv
 import time
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from s2m.data import load_scene
 from s2m.experiment import load_levels, prepare, scene_rows
 from s2m.mapping import precompute_observations
 from s2m.perception import load_detections, load_masks
+from s2m.io import write_csv
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
@@ -40,8 +40,5 @@ if __name__ == "__main__":
         masks = None if args.masks is None else load_masks(args.masks / f"{scene_dir.name}.npz")
         setup = prepare(scene, precompute_observations(scene, load_detections(det_path), masks=masks))
         rows = list(scene_rows(setup, levels, args.seeds))
-        with open(out, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
-            w.writeheader()
-            w.writerows(rows)
+        write_csv(out, rows)
         print(f"{scene.name}: {len(setup.entities)} avoid entities, {len(rows)} rows, {time.time() - t:.0f} s")

@@ -22,7 +22,6 @@ import numpy as np
 class RRTConfig:
     step: float = 0.3  # metres per extension
     max_iter: int = 2000
-    goal_tol: float = 0.3  # metres; trees are connected when within one step
     cone: bool = False  # use the angle-limited sampling zone
     p_cone: float = 0.7  # probability of a cone sample (vs uniform) when cone=True
     alpha_d: float = np.deg2rad(8.0)

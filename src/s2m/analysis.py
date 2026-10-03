@@ -16,12 +16,12 @@ radius is calibrated on:
   separate     : label_only radius + pose_only radius, each quantile at alpha (naive composition)
   joint        : one quantile of the miss distance of the drifted predicted map (this work)
   label_cell   : reference: per-cell label-space CP (Sundarsingh et al.-style), no inflation
-A Bonferroni split (alpha/2 + alpha/2) needs n_cal >= 19 at alpha = 0.1 and is reported as such.
+A Bonferroni split (alpha/2 + alpha/2) would need n_cal >= 19 at alpha = 0.1, more than the 13 available,
+so no such arm is evaluated.
 """
 
 from __future__ import annotations
 
-import csv
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +31,7 @@ import numpy as np
 from s2m.conformal import UNCOVERABLE, conformal_quantile
 from s2m.entities import AVOID_CLASSES
 from s2m.experiment import LAMBDAS, R_MAX
+from s2m.io import read_csv
 
 TOL = 0.05  # one grid cell: "inside the region" for arms without inflation
 LAM0 = 0.05  # region threshold shared by the arms, chosen on the dev scene
@@ -48,7 +49,7 @@ def load_scores(score_dir: Path, exclude=()) -> list[dict]:
     for p in sorted(Path(score_dir).glob("*.csv")):
         if p.stem in exclude:
             continue
-        for r in csv.DictReader(open(p)):
+        for r in read_csv(p):
             rows.append({k: (v if k in ("scene", "level") else float(v)) for k, v in r.items()})
     return rows
 
@@ -56,6 +57,8 @@ def load_scores(score_dir: Path, exclude=()) -> list[dict]:
 def miss_at(row: dict, cls: str, lam: float) -> float:
     """Miss distance of class `cls` at threshold lam (nearest stored lambda not above lam,
     i.e. never a smaller region than asked for)."""
+    if lam > LAMBDAS[-1] + 1e-9:
+        raise ValueError(f"lambda {lam} is above the largest stored threshold {LAMBDAS[-1]}")
     i = np.searchsorted(LAMBDAS, lam + 1e-9) - 1
     return row[f"miss_pred_{cls}_{LAMBDAS[max(i, 0)]:.2f}"]
 
@@ -81,6 +84,40 @@ def calibrate_class(cal: list[dict], cal_L0: list[dict], cls: str, alpha: float,
     out["separate"] = None if r_label is None or r_pose is None else ArmParams(lam0, r_label + r_pose)
     out["joint"] = None if r_joint is None else ArmParams(lam0, r_joint)
     return out
+
+
+def calibrated_params(rows: list[dict], cal_scenes, levels, alpha: float, rng: np.random.Generator,
+                      cls_ids: dict[str, int]):
+    """Parameters of every arm for planning in a scene that is NOT among `cal_scenes`.
+
+    Returns params[level][arm][class_id] (ArmParams or None = abstains) and fallback[level][class_id],
+    the pose-only radius used when a class abstains (None if that abstains too). Each calibration
+    scene contributes one random drift realization per level.
+    """
+    by: dict[tuple[str, str], list[dict]] = {}
+    for r in rows:
+        by.setdefault((r["scene"], r["level"]), []).append(r)
+    params, fallback = {}, {}
+    for lv in levels:
+        cal = [by[(s, lv)][rng.integers(len(by[(s, lv)]))] for s in cal_scenes]
+        cal_L0 = [by[(s, "L0")][0] for s in cal_scenes]
+        per_class = {cid: calibrate_class(cal, cal_L0, name, alpha) for name, cid in cls_ids.items()}
+        params[lv] = {arm: {cid: per_class[cid][arm] for cid in per_class} for arm in ARMS}
+        fallback[lv] = {cid: None if per_class[cid]["pose_only"] is None else per_class[cid]["pose_only"].radius
+                        for cid in per_class}
+    return params, fallback
+
+
+def read_params(path, level: str, class_ids: dict[str, int]):
+    """Inverse of the params_<scene>.csv files written by scripts/run_missions.py."""
+    params, fallback = {}, {}
+    for r in read_csv(path):
+        if r["level"] != level or r["class"] not in class_ids:
+            continue
+        cid = class_ids[r["class"]]
+        params.setdefault(r["arm"], {})[cid] = None if r["lam"] == "" else ArmParams(float(r["lam"]), float(r["radius"]))
+        fallback[cid] = None if r["fallback_radius"] == "" else float(r["fallback_radius"])
+    return params, fallback
 
 
 def covers(row: dict, cls: str, p: ArmParams | None) -> bool:

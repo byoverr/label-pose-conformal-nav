@@ -8,20 +8,20 @@ Which scenes fail is the dependence structure:
   disjoint : pose fails in the k scenes where labels are best (failures never coincide),
   random   : a random k-subset, averaged over draws (independence).
 The separate arm's guarantee is only 1 - 2*alpha by the union bound; the joint quantile is valid
-whatever the dependence. Writes results/tables/composition.csv and
-results/figures/composition_stress.png.
+whatever the dependence. Writes results/tables/composition_a<alpha>_<level>.csv and
+results/figures/composition_stress_a<alpha>_<level>.png (e.g. _a03_L5).
 
 Example: python scripts/composition_stress.py --alpha 0.3 --fail-level L5
 """
 
 import argparse
-import csv
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from s2m.analysis import LAM0, load_scores, miss_at, run_splits
+from s2m.io import DEV_SCENES, read_csv, write_csv
 from s2m.viz import ARM_STYLE, MUTED, setup
 
 CLASSES = ("indoor_plant", "bike")
@@ -50,7 +50,7 @@ if __name__ == "__main__":
 
     tag = f"_a{str(args.alpha).replace('.', '')}_{args.fail_level}"
     table_path = Path(f"results/tables/composition{tag}.csv")
-    rows = load_scores(args.scores, exclude=("apt_0",))
+    rows = load_scores(args.scores, exclude=DEV_SCENES)
     scenes = sorted({r["scene"] for r in rows})
     rng = np.random.default_rng(0)
     table = []
@@ -79,12 +79,9 @@ if __name__ == "__main__":
 
     if args.replot:
         table = [{k: (v if k in ("class", "dependence", "arm") else float(v)) for k, v in r.items()}
-                 for r in csv.DictReader(open(table_path))]
+                 for r in read_csv(table_path)]
     else:
-        with open(table_path, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(table[0]), lineterminator="\n")
-            w.writeheader()
-            w.writerows(table)
+        write_csv(table_path, table)
 
     setup()
     fig, axes = plt.subplots(1, len(CLASSES), figsize=(9, 3.4), sharey=True)

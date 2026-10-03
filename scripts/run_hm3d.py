@@ -7,14 +7,13 @@ lighting at once. For every single-floor HM3D scene the script
   2. estimates the floor height from ground-truth floor points and shifts it to y = 0,
   3. runs the same YOLO-World vocabulary and writes score rows for every drift level to
      results/scores_hm3d/<scene>.csv (same format as scripts/compute_scores.py).
-Calibration still uses ReplicaCAD only; scripts/analyze_ood.py tests the radii on these scenes.
+Calibration still uses ReplicaCAD only; scripts/analyze_variants.py tests the margins on these scenes.
 
 Frames first: python scripts/download_subset.py <scenes> --root data/hm3d --out data/hm3d
 Example:      python scripts/run_hm3d.py data/hm3d/*
 """
 
 import argparse
-import csv
 import time
 from pathlib import Path
 
@@ -23,8 +22,10 @@ import yaml
 
 from s2m.data import backproject, load_remapped_scene, load_scene, map_class_names
 from s2m.experiment import load_levels, prepare, scene_rows
+from s2m.grid import FLOOR_CLASSES
 from s2m.mapping import precompute_observations
 from s2m.perception import OpenVocabDetector, load_detections, object_vocabulary, save_detections
+from s2m.io import write_csv
 
 MAX_HEIGHT_RANGE = 0.3  # metres of camera height change; more means stairs / several floors
 
@@ -68,7 +69,7 @@ if __name__ == "__main__":
         raw = load_scene(scene_dir)
         h = np.ptp(raw.poses[:, 1, 3])
         lut = map_class_names(raw.classes, target, rules)
-        floor_src = [i for i in raw.classes if target[lut[i]] in ("floor", "rug", "mat")]
+        floor_src = [i for i in raw.classes if target[lut[i]] in FLOOR_CLASSES]
         fy = floor_height(raw, floor_src)
         mapped = sorted({target[lut[i]] for i in raw.classes} - {"other"})
         if h > MAX_HEIGHT_RANGE or not np.isfinite(fy):
@@ -81,10 +82,7 @@ if __name__ == "__main__":
             save_detections(det_path, {i: detector(scene.rgb(i)) for i in scene.frame_ids()})
         setup = prepare(scene, precompute_observations(scene, load_detections(det_path)))
         rows = list(scene_rows(setup, levels, args.seeds))
-        with open(out, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
-            w.writeheader()
-            w.writerows(rows)
+        write_csv(out, rows)
         ents = {target[k]: sum(e.cls == k for e in setup.entities) for k in setup.avoid_ids}
         print(f"{scene.name}: floor at y = {fy:.2f} m, mapped classes {mapped}, avoid entities {ents}, "
               f"{len(rows)} rows, {time.time() - t:.0f} s", flush=True)

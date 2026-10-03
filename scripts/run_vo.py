@@ -12,7 +12,6 @@ Example: python scripts/run_vo.py data/replica_cad/* --steps 2 4
 """
 
 import argparse
-import csv
 import time
 from pathlib import Path
 
@@ -24,6 +23,7 @@ from s2m.experiment import prepare, realization_scores
 from s2m.mapping import precompute_observations
 from s2m.odometry import VOResult, full_trajectory, load_vo, planarize, rgbd_odometry, save_vo
 from s2m.perception import load_detections
+from s2m.io import write_csv
 
 
 def cached_vo(vo_scene, step: int, cache: Path) -> VOResult:
@@ -78,8 +78,5 @@ if __name__ == "__main__":
             print(f"{scene.name} VO{step}: {len(vo.frames)} frames, ATE {row['ate'] * 100:.1f} cm "
                   f"(removed: height {row['height_err_max'] * 100:.0f} cm, tilt {row['tilt_err_max_deg']:.1f} deg), end drift {endpoint_drift(est, scene.poses) * 100:.1f} % "
                   f"of {path_length(scene.poses):.1f} m, solver failures {row['vo_failures']}", flush=True)
-        with open(out, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
-            w.writeheader()
-            w.writerows(rows)
+        write_csv(out, rows)
         print(f"{scene.name}: {time.time() - t:.0f} s", flush=True)

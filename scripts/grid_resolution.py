@@ -15,7 +15,6 @@ Example: python scripts/grid_resolution.py --res 0.05 0.25 0.5 1.0
 """
 
 import argparse
-import csv
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +27,7 @@ from s2m.experiment import R_MAX
 from s2m.mapping import build_map, fixed_spec, floor_class_ids, precompute_observations
 from s2m.perception import load_detections
 from s2m.planning import SAFETY_DISTANCE, dilate
+from s2m.io import DEV_SCENES, write_csv
 
 AVOID = ("indoor_plant", "bike")
 
@@ -60,7 +60,7 @@ if __name__ == "__main__":
     ap.add_argument("--detections", type=Path, default=Path("data/cache/detections_closed5"))
     args = ap.parse_args()
 
-    scenes = [d for d in sorted(Path("data/replica_cad").iterdir()) if d.name != "apt_0"]
+    scenes = [d for d in sorted(Path("data/replica_cad").iterdir()) if d.name not in DEV_SCENES]
     stats = {r: {} for r in args.res}
     for d in scenes:
         scene = load_scene(d)
@@ -102,7 +102,4 @@ if __name__ == "__main__":
                    "joint_free_lost": float(np.median(lost_j)) if lost_j else np.nan}
             table.append(row)
             print(" ".join(f"{k}={v:.3f}" if isinstance(v, float) else f"{k}={v}" for k, v in row.items()))
-    with open("results/tables/grid_resolution.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(table[0]), lineterminator="\n")
-        w.writeheader()
-        w.writerows(table)
+    write_csv("results/tables/grid_resolution.csv", table)

@@ -14,7 +14,6 @@ from s2m.mapping import Map
 # the dev scene apt_0 only: it is a 5 m^2 region, not an object, and a box detector does not
 # localise it (median class score 0.03), so it would dominate every score (see docs/journal.md).
 AVOID_CLASSES = ("indoor_plant", "tv_stand", "bike")
-GOAL_CLASSES = ("sofa", "refrigerator", "table", "chair", "cabinet")
 
 
 @dataclass

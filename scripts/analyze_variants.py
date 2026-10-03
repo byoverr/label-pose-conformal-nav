@@ -10,18 +10,17 @@ Example: python scripts/analyze_variants.py --alpha 0.1
 """
 
 import argparse
-import csv
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from s2m.analysis import ARMS, LAM0, calibrate_class, covers, load_scores, miss_at, run_splits
+from s2m.io import DEV_SCENES, write_csv
 from s2m.viz import ARM_STYLE, MUTED, setup
 
 CLASSES = ("indoor_plant", "bike")
 LEVELS = ("L0", "L1", "L2", "L3", "L4", "L5")
-DEV = ("apt_0",)
 SHOW_ARMS = ("uncalibrated", "label_only", "pose_only", "separate", "joint")
 
 
@@ -30,13 +29,6 @@ def summary(stats, cls, arm):
     r = np.array(st["radius"], float)
     return {"coverage_mean": float(np.mean(st["coverage"])), "abstain_rate": float(np.mean(st["abstain"])),
             "radius_median": float(np.nanmedian(r)) if np.isfinite(r).any() else np.nan}
-
-
-def write(path, table):
-    with open(path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(table[0]), lineterminator="\n")
-        w.writeheader()
-        w.writerows(table)
 
 
 def ood_stats(cal_rows, test_rows, level, alpha, cls, draws, rng):
@@ -65,12 +57,12 @@ if __name__ == "__main__":
     ap.add_argument("--n-cal", type=int, default=13)
     args = ap.parse_args()
     rng = np.random.default_rng(0)
-    base = load_scores(Path("results/scores"), exclude=DEV)
+    base = load_scores(Path("results/scores"), exclude=DEV_SCENES)
     panels = {}
 
     # SAM masks vs box + depth masks: same splits, same levels.
     if Path("results/scores_sam").exists():
-        sam = load_scores(Path("results/scores_sam"), exclude=DEV)
+        sam = load_scores(Path("results/scores_sam"), exclude=DEV_SCENES)
         table = []
         for name, rows in (("box", base), ("sam", sam)):
             for lv in LEVELS:
@@ -81,12 +73,12 @@ if __name__ == "__main__":
             for cls in CLASSES:
                 m = [miss_at(r, cls, LAM0) for r in rows if r["level"] == "L0"]
                 print(f"{name}: L0 label miss {cls}: median {np.median(m):.2f} m, max {np.max(m):.2f} m")
-        write("results/tables/variants_sam.csv", table)
+        write_csv("results/tables/variants_sam.csv", table)
         panels["sam"] = table
 
     # Real visual odometry: one realization per scene and VO setting.
     if Path("results/scores_vo").exists():
-        vo = load_scores(Path("results/scores_vo"), exclude=DEV)
+        vo = load_scores(Path("results/scores_vo"), exclude=DEV_SCENES)
         vo_scenes = {r["scene"] for r in vo}
         if len(vo_scenes) < 15:
             print(f"VO: only {len(vo_scenes)} scenes scored so far, skipped")
@@ -105,7 +97,7 @@ if __name__ == "__main__":
                                   "ate_max": float(ates.max()), "class": cls, "arm": arm, **summary(st, cls, arm)})
             print(f"{lv}: {n} scenes, ATE median {np.median(ates) * 100:.1f} cm, "
                   f"quartiles {np.percentile(ates, 25) * 100:.1f}-{np.percentile(ates, 75) * 100:.1f} cm, max {ates.max():.2f} m")
-        write("results/tables/variants_vo.csv", table)
+        write_csv("results/tables/variants_vo.csv", table)
         panels["vo"] = table
 
     # Out of distribution: ReplicaCAD calibration, HM3D test.
@@ -119,7 +111,7 @@ if __name__ == "__main__":
                     continue
                 for arm in ARMS:
                     table.append({"level": lv, "class": cls, "n_test_scenes": n_test, "arm": arm, **summary(st, cls, arm)})
-        write("results/tables/variants_ood.csv", table)
+        write_csv("results/tables/variants_ood.csv", table)
         panels["ood"] = table
 
     for name, table in panels.items():

@@ -16,7 +16,6 @@ from scipy.sparse.csgraph import dijkstra
 
 ROBOT_RADIUS = 0.2  # metres (OSMa-Bench agent radius)
 SAFETY_DISTANCE = 0.5  # metres to keep from avoid-class objects
-GOAL_REACH = 0.6  # metres: reaching the goal = ending this close to the goal object
 
 _NEIGHBOURS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
@@ -84,7 +83,8 @@ class Outcome:
     planned: bool
     violation: bool = False  # came closer than SAFETY_DISTANCE to a true avoid object
     collision: bool = False  # came closer than ROBOT_RADIUS to a true obstacle
-    reached: bool = False  # ended within `reach` of the true goal
+    reached: bool = False  # ended within `reach` of the goal (always true for a found path when the
+    # goal is given in the planner frame, as in s2m.missions; kept as a consistency check)
     length: float = np.nan
 
     @property
@@ -93,7 +93,7 @@ class Outcome:
 
 
 def evaluate_path(path: np.ndarray | None, true_avoid_dist: np.ndarray, true_obst_dist: np.ndarray,
-                  true_goal_dist: np.ndarray, res: float, reach: float = GOAL_REACH) -> Outcome:
+                  true_goal_dist: np.ndarray, res: float, reach: float) -> Outcome:
     """Judge a planned path against the truth (distance fields in the planner frame)."""
     if path is None:
         return Outcome(planned=False)

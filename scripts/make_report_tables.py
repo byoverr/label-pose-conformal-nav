@@ -3,8 +3,9 @@
 Writes report/tables/*.tex.
 """
 
-import csv
 from pathlib import Path
+
+from s2m.io import read_csv
 
 OUT = Path("report/tables")
 ARM_RU = {
@@ -29,7 +30,7 @@ def fmt(v, digits=2):
 
 
 def coverage_table():
-    rows = list(csv.DictReader(open("results/tables/coverage.csv")))
+    rows = read_csv("results/tables/coverage.csv")
     levels = ("L0", "L2", "L3", "L4")
     arms = ("uncalibrated", "label_cell", "label_only", "pose_only", "separate", "joint")
     lines = ["\\begin{tabular}{ll" + "cc" * len(levels) + "}", "\\toprule",
@@ -57,7 +58,7 @@ def missions_table(tag=""):
     path = Path(f"results/tables/missions{tag}.csv")
     if not path.exists():
         return
-    rows = list(csv.DictReader(open(path)))
+    rows = read_csv(path)
     levels = ("L0", "L2", "L4")
     arms = ("uncalibrated", "label_cell", "label_only", "pose_only", "separate", "joint", "oracle")
     lines = ["\\begin{tabular}{l" + "ccc" * len(levels) + "}", "\\toprule",
@@ -77,7 +78,7 @@ def bridge_table(tag=""):
     path = Path(f"results/tables/planner_bridge{tag}_summary.csv")
     if not path.exists():
         return
-    rows = list(csv.DictReader(open(path)))
+    rows = read_csv(path)
     pls = ("rrt_connect", "angle_zone", "angle_zone_adaptive")
     lines = ["\\begin{tabular}{ccc|ccc|ccc|ccc}", "\\toprule",
              "$m$ & своб. & решаемо & \\multicolumn{3}{c|}{решено за бюджет} & "
@@ -97,7 +98,7 @@ def alpha_table():
     path = Path("results/tables/alpha_sweep.csv")
     if not path.exists():
         return
-    rows = list(csv.DictReader(open(path)))
+    rows = read_csv(path)
     get = lambda a, arm, key: next(r[key] for r in rows if r["alpha"] == a and r["arm"] == arm)
     lines = ["\\begin{tabular}{c|cc|cc|c|ccc|c}", "\\toprule",
              "$\\alpha$ & \\multicolumn{2}{c|}{покрытие} & \\multicolumn{2}{c|}{$\\hat q$, м} & отк. & "
@@ -120,18 +121,18 @@ def variants_table():
     specs = []
     sam = Path("results/tables/variants_sam.csv")
     if sam.exists():
-        rows = list(csv.DictReader(open(sam)))
+        rows = read_csv(sam)
         for m, name in (("box", "рамка + глубина"), ("sam", "MobileSAM")):
             for lv in ("L0", "L3", "L4"):
                 specs.append((f"{name}, {lv}", [r for r in rows if r["masks"] == m and r["level"] == lv]))
     vo = Path("results/tables/variants_vo.csv")
     if vo.exists():
-        rows = list(csv.DictReader(open(vo)))
+        rows = read_csv(vo)
         for lv in sorted({r["level"] for r in rows}):
             specs.append((f"ВО, каждый {lv[2:]}-й кадр", [r for r in rows if r["level"] == lv]))
     ood = Path("results/tables/variants_ood.csv")
     if ood.exists():
-        rows = list(csv.DictReader(open(ood)))
+        rows = read_csv(ood)
         for lv in ("L0", "L3"):
             specs.append((f"HM3D (OOD), {lv}", [r for r in rows if r["level"] == lv]))
     if not specs:
@@ -160,7 +161,7 @@ def comparison_table():
     path = Path("results/tables/comparison.csv")
     if not path.exists():
         return
-    rows = list(csv.DictReader(open(path)))
+    rows = read_csv(path)
     setting_ru = {"closed": "их: 5 классов, 95\\,\\%", "open": "наши: 98 подсказок, 90\\,\\%"}
     lines = ["\\begin{tabular}{ll|ccc|ccc|cc|c}", "\\toprule",
              "Условия & Дрейф & \\multicolumn{3}{c|}{покадровая CP меток} & \\multicolumn{3}{c|}{\\textbf{совместно}} & "
@@ -187,7 +188,6 @@ if __name__ == "__main__":
     alpha_table()
     comparison_table()
     variants_table()
-    for tag in ("", "_pb"):
-        missions_table(tag)
-        bridge_table(tag)
+    missions_table("_pb")
+    bridge_table("_pb")
     print("tables:", sorted(p.name for p in OUT.glob("*.tex")))

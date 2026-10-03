@@ -7,7 +7,6 @@ Example: python scripts/analyze_coverage.py --alpha 0.1 --splits 200
 """
 
 import argparse
-import csv
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -15,11 +14,9 @@ import numpy as np
 
 from s2m.analysis import ARMS, LAM0, load_scores, run_splits
 from s2m.entities import AVOID_CLASSES
+from s2m.io import DEV_SCENES, LEVELS, level_labels, write_csv
 from s2m.viz import MUTED, arm_line, setup
 
-DEV_SCENES = ("apt_0",)
-LEVELS = ("L0", "L1", "L2", "L3", "L4", "L5")
-LEVEL_NOTE = {"L0": "GT", "L1": "0.6 cm", "L2": "3 cm", "L3": "9.5 cm", "L4": "63 cm", "L5": "3.5 m"}
 RADIUS_ARMS = ("label_only", "pose_only", "separate", "joint")
 
 
@@ -54,12 +51,7 @@ if __name__ == "__main__":
                     "abstain_rate": summarise(stats[lv], cls, arm, "abstain", np.mean),
                     "radius_median": summarise(stats[lv], cls, arm, "radius", np.nanmedian),
                 })
-    out = Path("results/tables")
-    out.mkdir(parents=True, exist_ok=True)
-    with open(out / f"coverage{args.tag}.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(table[0]), lineterminator="\n")
-        w.writeheader()
-        w.writerows(table)
+    write_csv(f"results/tables/coverage{args.tag}.csv", table)
     for r in table:
         if r["level"] in ("L0", "L2", "L4"):
             print(f"{r['level']} {r['class']:12s} {r['arm']:12s} cov {r['coverage_mean']:.3f} "
@@ -67,7 +59,8 @@ if __name__ == "__main__":
 
     setup()
     x = np.arange(len(LEVELS))
-    xt = [f"{lv}\n{LEVEL_NOTE[lv]}" for lv in LEVELS]
+    note = level_labels(rows)
+    xt = [f"{lv}\n{note[lv]}" for lv in LEVELS]
     fig, axes = plt.subplots(3, len(AVOID_CLASSES), figsize=(10, 8.2), sharex=True)
     for j, cls in enumerate(AVOID_CLASSES):
         ax = axes[0, j]
@@ -88,7 +81,7 @@ if __name__ == "__main__":
     axes[1, 0].set_ylabel("keep-out radius, m (median)")
     axes[2, 0].set_ylabel("abstention rate")
     for ax in axes[2]:
-        ax.set_xlabel("pose drift level (ATE)")
+        ax.set_xlabel("pose drift level (median ATE over scenes)")
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=3, bbox_to_anchor=(0.5, -0.04))
     fig.suptitle(f"Per-class guarantees under pose drift ({len(scenes)} scenes, {args.splits} splits, "
@@ -117,7 +110,7 @@ if __name__ == "__main__":
     ax.set_title("Price of the guarantee: extra keep-out distance")
     for ax in axes:
         ax.set_xticks(x, xt)
-        ax.set_xlabel("pose drift level (ATE)")
+        ax.set_xlabel("pose drift level (median ATE over scenes)")
     fig.tight_layout()
     fig.savefig(f"results/figures/coverage_headline{args.tag}.png")
     print("saved tables and figures")

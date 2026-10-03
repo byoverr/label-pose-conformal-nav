@@ -1,10 +1,9 @@
-"""Map-quality metrics per scene at ground-truth poses (for H1: map metric vs mission outcome).
+"""Map-quality metrics per scene at ground-truth poses (for H4: map metric vs mission outcome).
 
 mIoU over classes with >= 20 GT cells among occupied cells (argmax labels), and the IoU of the
 avoid classes only. Writes results/tables/scene_metrics.csv.
 """
 
-import csv
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +12,7 @@ from s2m.data import load_scene
 from s2m.entities import AVOID_CLASSES, class_ids
 from s2m.mapping import build_map, fixed_spec, floor_class_ids, precompute_observations
 from s2m.perception import load_detections
+from s2m.io import write_csv
 
 
 def iou_table(gt_lab, pred_lab, occ, min_cells=20):
@@ -43,7 +43,4 @@ if __name__ == "__main__":
                      "labelled_occupied": float((pred.label()[occ] >= 0).mean())})
         print(rows[-1], flush=True)
     Path("results/tables").mkdir(parents=True, exist_ok=True)
-    with open("results/tables/scene_metrics.csv", "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0]), lineterminator="\n")
-        w.writeheader()
-        w.writerows(rows)
+    write_csv("results/tables/scene_metrics.csv", rows)
