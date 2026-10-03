@@ -16,6 +16,7 @@ ARM_RU = {
     "joint": "\\textbf{совместно}",
     "oracle": "оракул",
 }
+SHORT_RU = {"label_only": "метки", "separate": "раздельно", "joint": "\\textbf{совместно}"}
 CLASS_RU = {"indoor_plant": "растение", "tv_stand": "тумба под ТВ", "bike": "велосипед"}
 
 
@@ -92,9 +93,74 @@ def bridge_table(tag=""):
     (OUT / f"bridge{tag}.tex").write_text("\n".join(lines) + "\n")
 
 
+def alpha_table():
+    path = Path("results/tables/alpha_sweep.csv")
+    if not path.exists():
+        return
+    rows = list(csv.DictReader(open(path)))
+    get = lambda a, arm, key: next(r[key] for r in rows if r["alpha"] == a and r["arm"] == arm)
+    lines = ["\\begin{tabular}{c|cc|cc|c|ccc|c}", "\\toprule",
+             "$\\alpha$ & \\multicolumn{2}{c|}{покрытие} & \\multicolumn{2}{c|}{$\\hat q$, м} & отк. & "
+             "\\multicolumn{3}{c|}{путь найден} & наруш. \\\\",
+             " & раст. & велос. & раст. & велос. & раст. & совм. & разд. & оракул & совм. \\\\", "\\midrule"]
+    for a in sorted({r["alpha"] for r in rows}, key=float):
+        cells = [fmt(a, 2), fmt(get(a, "joint", "coverage_mean_indoor_plant")), fmt(get(a, "joint", "coverage_mean_bike")),
+                 fmt(get(a, "joint", "radius_median_indoor_plant")), fmt(get(a, "joint", "radius_median_bike")),
+                 fmt(get(a, "joint", "abstain_rate_indoor_plant")), fmt(get(a, "joint", "planned")),
+                 fmt(get(a, "separate", "planned")), fmt(get(a, "oracle", "planned")),
+                 fmt(get(a, "joint", "violation"), 3)]
+        lines.append(" & ".join(cells) + " \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    (OUT / "alpha.tex").write_text("\n".join(lines) + "\n")
+
+
+def variants_table():
+    """One row per (variant, level), joint / separate / labels-only: coverage and radius, bike and plant."""
+    arms = ("label_only", "separate", "joint")
+    specs = []
+    sam = Path("results/tables/variants_sam.csv")
+    if sam.exists():
+        rows = list(csv.DictReader(open(sam)))
+        for m, name in (("box", "рамка + глубина"), ("sam", "MobileSAM")):
+            for lv in ("L0", "L3", "L4"):
+                specs.append((f"{name}, {lv}", [r for r in rows if r["masks"] == m and r["level"] == lv]))
+    vo = Path("results/tables/variants_vo.csv")
+    if vo.exists():
+        rows = list(csv.DictReader(open(vo)))
+        for lv in sorted({r["level"] for r in rows}):
+            specs.append((f"ВО, каждый {lv[2:]}-й кадр", [r for r in rows if r["level"] == lv]))
+    ood = Path("results/tables/variants_ood.csv")
+    if ood.exists():
+        rows = list(csv.DictReader(open(ood)))
+        for lv in ("L0", "L3"):
+            specs.append((f"HM3D (OOD), {lv}", [r for r in rows if r["level"] == lv]))
+    if not specs:
+        return
+    lines = ["\\begin{tabular}{l|" + "cc" * len(arms) + "|" + "cc" * len(arms) + "}", "\\toprule",
+             "Вариант & \\multicolumn{6}{c|}{велосипед} & \\multicolumn{6}{c}{растение} \\\\",
+             " & " + " & ".join(f"\\multicolumn{{2}}{{c}}{{{SHORT_RU[a]}}}" for a in arms * 2) + " \\\\",
+             " & " + " & ".join(["покр. & $\\hat q$"] * len(arms) * 2) + " \\\\", "\\midrule"]
+    for name, rs in specs:
+        cells = []
+        for cls in ("bike", "indoor_plant"):
+            for arm in arms:
+                r = next((x for x in rs if x["class"] == cls and x["arm"] == arm), None)
+                if r is None:
+                    cells += ["---", "---"]
+                    continue
+                abst = float(r["abstain_rate"])
+                rad = fmt(r["radius_median"])
+                cells += [fmt(r["coverage_mean"]), rad + ("$^\\dagger$" if abst >= 0.5 else "")]
+        lines.append(f"{name} & " + " & ".join(cells) + " \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    (OUT / "variants.tex").write_text("\n".join(lines) + "\n")
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     coverage_table()
+    alpha_table()
+    variants_table()
     for tag in ("", "_pb"):
         missions_table(tag)
         bridge_table(tag)

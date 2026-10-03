@@ -16,7 +16,7 @@ import numpy as np
 
 from s2m.data import Scene, backproject
 from s2m.grid import FLOOR_CLASSES, GridSpec
-from s2m.perception import Detections, pixel_labels
+from s2m.perception import Detections, pixel_labels, upsample_masks
 
 FLOOR_MAX_Y = 0.05  # points below this height are floor
 OBSTACLE_BAND = (0.1, 1.8)  # points in this height range are obstacles for a ground robot
@@ -32,13 +32,15 @@ class FrameObs:
 
 
 def precompute_observations(scene: Scene, detections: dict[int, Detections], stride: int = 4,
-                            frames=None) -> list[FrameObs]:
+                            frames=None, masks: tuple[dict[int, np.ndarray], int] | None = None) -> list[FrameObs]:
+    """`masks`: optional (frame -> stride-grid instance masks, mask stride) from load_masks."""
     frames = scene.frame_ids() if frames is None else frames
     out = []
     for i in frames:
         depth = scene.depth(i)
         pts, pix = backproject(depth, scene.intrinsics, stride)
-        det_lab, det_score = pixel_labels(detections[i], depth)
+        m = None if masks is None else upsample_masks(masks[0][i], masks[1], depth.shape)
+        det_lab, det_score = pixel_labels(detections[i], depth, masks=m)
         out.append(FrameObs(i, pts.astype(np.float32),
                             scene.semantic(i).ravel()[pix].astype(np.int16),
                             det_lab.ravel()[pix].astype(np.int16),

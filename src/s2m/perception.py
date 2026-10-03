@@ -3,8 +3,11 @@
 Perception does not depend on the pose, so detections are computed once per frame and cached;
 pose drift only changes where the labelled pixels land in the grid.
 
-Box -> mask: a detection box also covers background, so inside each box we keep only pixels
-whose depth is close to the box's median depth (a cheap, depth-consistent instance mask).
+Box -> mask: a detection box also covers background. Two variants are supported:
+  * "box": inside each box keep only pixels whose depth is close to the box's median depth
+    (a cheap, depth-consistent instance mask; the default);
+  * "sam": MobileSAM prompted with the box (ConceptGraphs-style instance masks). Masks are cached
+    on the stride grid the map uses, so they are exact at every pixel that reaches the map.
 """
 
 from __future__ import annotations
@@ -86,18 +89,70 @@ def load_detections(path: Path) -> dict[int, Detections]:
     return out
 
 
+class BoxSegmenter:
+    """MobileSAM prompted with detection boxes (Ultralytics SAM wrapper)."""
+
+    def __init__(self, weights: str = "models/mobile_sam.pt", device: str | None = None):
+        import torch
+        from ultralytics import SAM
+
+        self.device = device or ("mps" if torch.backends.mps.is_available() else "cpu")
+        self.model = SAM(weights)
+
+    def __call__(self, rgb: np.ndarray, dets: Detections) -> np.ndarray:
+        """(D, H, W) bool masks, one per detection box."""
+        if len(dets.scores) == 0:
+            return np.zeros((0, *rgb.shape[:2]), bool)
+        bgr = np.ascontiguousarray(rgb[:, :, ::-1])
+        res = self.model.predict(bgr, bboxes=dets.boxes.tolist(), device=self.device, verbose=False)[0]
+        return res.masks.data.cpu().numpy().astype(bool)
+
+
+def save_masks(path: Path, masks: dict[int, np.ndarray], stride: int) -> None:
+    """Masks subsampled on the stride grid, bit-packed; same frame/detection order as detections."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frames = np.array(sorted(masks), dtype=np.int32)
+    sub = [masks[f][:, ::stride, ::stride] for f in frames]
+    shape = sub[0].shape[1:]
+    packed = np.concatenate([np.packbits(m.reshape(len(m), shape[0] * shape[1]), axis=1) for m in sub])
+    np.savez_compressed(path, frames=frames, counts=[len(m) for m in sub], packed=packed,
+                        shape=shape, stride=stride)
+
+
+def load_masks(path: Path) -> tuple[dict[int, np.ndarray], int]:
+    """Frame -> (D, h, w) bool masks on the stride grid, and the stride."""
+    z = np.load(path)
+    h, w = z["shape"]
+    out, start = {}, 0
+    for f, n in zip(z["frames"], z["counts"]):
+        out[int(f)] = np.unpackbits(z["packed"][start:start + n], axis=1, count=h * w).reshape(n, h, w).astype(bool)
+        start += n
+    return out, int(z["stride"])
+
+
+def upsample_masks(masks: np.ndarray, stride: int, shape: tuple[int, int]) -> np.ndarray:
+    """Nearest upsampling to full resolution; exact on the stride grid the map samples."""
+    return masks.repeat(stride, axis=1).repeat(stride, axis=2)[:, :shape[0], :shape[1]]
+
+
 def pixel_labels(dets: Detections, depth: np.ndarray, depth_tol: float = 0.25,
-                 min_score: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+                 min_score: float = 0.0, masks: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """Per-pixel (class id, score); -1 / 0 where no detection claims the pixel.
 
-    Boxes are painted from lowest to highest score, so overlapping pixels keep the most
-    confident detection. Only pixels within `depth_tol` metres of the box's median depth are kept.
+    Detections are painted from lowest to highest score, so overlapping pixels keep the most
+    confident detection. Without `masks`, only pixels inside the box within `depth_tol` metres of
+    the box's median depth are kept; with `masks` (one per detection) the mask pixels with depth.
     """
     h, w = depth.shape
     labels = np.full((h, w), -1, dtype=np.int32)
     scores = np.zeros((h, w), dtype=np.float32)
     for j in np.argsort(dets.scores):
         if dets.scores[j] < min_score:
+            continue
+        if masks is not None:
+            keep = masks[j] & (depth > 0)
+            labels[keep] = dets.class_ids[j]
+            scores[keep] = dets.scores[j]
             continue
         x0, y0, x1, y1 = np.clip(np.round(dets.boxes[j]).astype(int), 0, [w, h, w, h])
         if x1 <= x0 or y1 <= y0:

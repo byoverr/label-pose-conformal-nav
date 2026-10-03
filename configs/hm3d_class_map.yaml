@@ -1,0 +1,24 @@
+# HM3D raw category (OSMa-Bench HM3D scenes) -> ReplicaCAD class used by the pipeline.
+# Only the avoid classes and the structural classes matter for the guarantee; every other HM3D
+# category becomes "other" (an unlabelled obstacle), like non-avoid objects in ReplicaCAD scenes.
+exact:
+  plant: indoor_plant
+  decorative plant: indoor_plant
+  bicycle: bike
+  tv stand: tv_stand
+  floor: floor
+  shower floor: floor
+  rug: rug
+  carpet: rug
+  mat: mat
+  floor mat: mat
+  bath mat: mat
+  doormat: mat
+  exercise mat: mat
+  stair: stair
+  stairs: stair
+# any category whose LAST word is one of these keys (e.g. "shower wall", "ceiling" variants are by first word)
+last_word:
+  wall: wall
+first_word:
+  ceiling: ceiling

@@ -24,8 +24,12 @@ META_FILES = ["traj.txt", "camera_params.yaml", "embed_semseg_classes.json", "lo
 BASE_URL = f"https://huggingface.co/datasets/{REPO_ID}/resolve/main"
 
 
-def download_scene(scene: str, out_dir: Path, step: int = 8, workers: int = 8) -> Path:
-    """Download metadata and every `step`-th frame (RGB, depth, semantic) of one scene.
+FRAME_KINDS = (("frame", "jpg"), ("depth", "png"), ("semantic", "png"))
+
+
+def download_scene(scene: str, out_dir: Path, step: int = 8, workers: int = 8,
+                   kinds=FRAME_KINDS, root: str = SCENE_ROOT) -> Path:
+    """Download metadata and every `step`-th frame (by default RGB, depth, semantic) of one scene.
 
     Plain HTTPS GETs in a small thread pool: hf_hub_download makes several requests per
     file and was ~3.5 s/file. Unauthenticated HF limit is ~3000 file requests / 5 min.
@@ -34,21 +38,21 @@ def download_scene(scene: str, out_dir: Path, step: int = 8, workers: int = 8) -
 
     scene_dir = Path(out_dir) / scene
     for name in META_FILES:
-        _fetch(f"{scene}/{name}", out_dir)
+        _fetch(f"{scene}/{name}", out_dir, root)
 
     n_frames = len(np.loadtxt(scene_dir / "traj.txt", ndmin=2))
     rel_paths = [f"{scene}/results/{prefix}{i:06d}.{ext}"
                  for i in range(0, n_frames, step)
-                 for prefix, ext in (("frame", "jpg"), ("depth", "png"), ("semantic", "png"))]
+                 for prefix, ext in kinds]
     with ThreadPoolExecutor(workers) as pool:
-        ok = list(pool.map(lambda p: _fetch(p, out_dir), rel_paths))
+        ok = list(pool.map(lambda p: _fetch(p, out_dir, root), rel_paths))
     failed = [p for p, good in zip(rel_paths, ok) if not good]
     if failed:  # re-running the download skips existing files, so this is recoverable
         print(f"{scene}: {len(failed)} files failed, e.g. {failed[0]}")
     return scene_dir
 
 
-def _fetch(rel_path: str, out_dir: Path, retries: int = 6) -> bool:
+def _fetch(rel_path: str, out_dir: Path, root: str = SCENE_ROOT, retries: int = 6) -> bool:
     """Download one file; returns False instead of raising after the last retry."""
     import time
     import urllib.error
@@ -58,7 +62,7 @@ def _fetch(rel_path: str, out_dir: Path, retries: int = 6) -> bool:
     if target.exists():
         return True
     target.parent.mkdir(parents=True, exist_ok=True)
-    url = f"{BASE_URL}/{SCENE_ROOT}/{rel_path}"
+    url = f"{BASE_URL}/{root}/{rel_path}"
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(url, timeout=60) as r:
@@ -115,6 +119,40 @@ def load_scene(scene_dir: Path) -> Scene:
     poses = np.loadtxt(scene_dir / "traj.txt", ndmin=2).reshape(-1, 4, 4)
     classes = _load_classes(scene_dir / "embed_semseg_classes.json")
     return Scene(scene_dir.name, scene_dir, intr, poses, classes)
+
+
+@dataclass
+class RemappedScene(Scene):
+    """A scene from another dataset expressed in a target class space, floor shifted to y = 0.
+
+    Used for the HM3D scenes of OSMa-Bench: their raw categories are mapped to ReplicaCAD classes
+    (configs/hm3d_class_map.yaml) so the same detector vocabulary, avoid classes and calibration
+    apply, and their floors are not at y = 0, which the mapping's height bands assume.
+    """
+    lut: np.ndarray | None = None  # source class id -> target class id
+
+    def semantic(self, i: int) -> np.ndarray:
+        return self.lut[super().semantic(i)]
+
+
+def map_class_names(names: dict[int, str], target: dict[int, str], rules: dict) -> np.ndarray:
+    """Lookup table source id -> target id following exact / last-word / first-word rules."""
+    by_name = {v: k for k, v in target.items()}
+    lut = np.full(max(names) + 1, by_name["other"], dtype=np.int32)
+    for i, name in names.items():
+        words = name.split()
+        dst = (rules.get("exact", {}).get(name) or rules.get("last_word", {}).get(words[-1])
+               or rules.get("first_word", {}).get(words[0]))
+        if dst is not None:
+            lut[i] = by_name[dst]
+    return lut
+
+
+def load_remapped_scene(scene_dir: Path, target: dict[int, str], rules: dict, floor_y: float) -> RemappedScene:
+    s = load_scene(scene_dir)
+    poses = s.poses.copy()
+    poses[:, 1, 3] -= floor_y
+    return RemappedScene(s.name, s.root, s.intrinsics, poses, dict(target), map_class_names(s.classes, target, rules))
 
 
 def _load_classes(path: Path) -> dict[int, str]:

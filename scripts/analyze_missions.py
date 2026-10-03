@@ -15,7 +15,8 @@ from scipy.stats import spearmanr
 from s2m.viz import arm_line, setup
 
 LEVELS = ("L0", "L1", "L2", "L3", "L4", "L5")
-LEVEL_NOTE = {"L0": "GT", "L1": "0.6 cm", "L2": "3 cm", "L3": "9.5 cm", "L4": "63 cm", "L5": "3.5 m"}
+LEVEL_NOTE = {"L0": "GT", "L1": "0.6 cm", "L2": "3 cm", "L3": "9.5 cm", "L4": "63 cm", "L5": "3.5 m",
+              "VO2": "VO, 2nd fr.", "VO4": "VO, 4th fr."}
 ARMS = ("joint", "separate", "label_only", "pose_only", "uncalibrated", "label_cell", "oracle")
 
 
@@ -39,7 +40,10 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", type=Path, default=Path("results/missions"))
     ap.add_argument("--tag", default="", help="suffix for output files, e.g. _pb")
+    ap.add_argument("--levels", nargs="+", default=list(LEVELS))
+    ap.add_argument("--no-h4", action="store_true", help="skip the mIoU vs violations analysis")
     args = ap.parse_args()
+    LEVELS = tuple(args.levels)
     rows = load(sorted(p for p in args.dir.glob("*.csv") if not p.name.startswith("params_")))
     print(f"{len(rows)} mission rows from {len({r['scene'] for r in rows})} scenes")
 
@@ -88,6 +92,8 @@ if __name__ == "__main__":
     fig.tight_layout(rect=(0, 0.06, 1, 1))
     fig.savefig(f"results/figures/missions_vs_drift{args.tag}.png")
 
+    if args.no_h4:
+        raise SystemExit
     # H4: map quality (mIoU at GT poses) vs safety of the uncalibrated planner at GT poses.
     metrics = {r["scene"]: r for r in csv.DictReader(open("results/tables/scene_metrics.csv"))}
     pts = []

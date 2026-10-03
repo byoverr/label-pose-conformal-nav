@@ -1,6 +1,12 @@
-numpy
-scipy
-matplotlib
-pillow
-pyyaml
-huggingface_hub
+# versions used for the reported results (Python 3.12, macOS / Apple MPS)
+numpy==2.5.3
+scipy==1.18.1
+matplotlib==3.11.2
+pillow==12.3.0
+pyyaml==6.0.3
+huggingface_hub==2.1.1
+torch==2.14.1
+torchvision==0.29.1
+ultralytics==8.4.171      # YOLO-World and MobileSAM
+open3d==0.20.0            # RGB-D visual odometry (scripts/run_vo.py)
+pytest==9.1.1
