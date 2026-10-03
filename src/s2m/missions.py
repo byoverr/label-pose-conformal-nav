@@ -1,10 +1,15 @@
 """Reach-avoid missions: plan on the predicted map, judge against the truth.
 
-A task = start point + goal point on the floor ("drive to the sofa next to the plant without
-touching the plant"). Goals are placed just outside the safety distance of an avoid-class
-object, so the shortest path has to approach the keep-out boundary: this is where an
-under-estimated object footprint turns into a violation. Goals are geometric on purpose:
-the guarantee studied here is about avoid classes, and semantic goal errors would confound it.
+A task = start point + goal point on the floor. Two task families:
+  pass_by  (default): start and goal lie far from every avoid-class object (>= START_GOAL_CLEAR),
+           but the shortest obstacle-free path between them passes within SAFETY_DISTANCE of an
+           avoid object. A safe detour exists; a planner that under-estimates the object's
+           footprint cuts the corner and violates. This is the situation the guarantee is for.
+  approach: goals 0.7-1.2 m from an avoid object ("drive to the sofa next to the plant"). Kept
+           for reference: once the calibrated keep-out exceeds 1.2 m the goal itself becomes
+           forbidden, so these tasks mostly measure how close a certificate lets the robot get.
+Goals are geometric on purpose: the guarantee studied here is about avoid classes, and
+semantic goal errors would confound it.
 
 The planner sees only the drifted predicted map; every calibration arm turns that map into
 keep-out zones (avoid-class region at threshold lam, dilated by SAFETY_DISTANCE + arm radius).
@@ -29,6 +34,7 @@ GOAL_TOL = 0.3  # metres: reaching the goal = ending this close to the goal poin
 GOAL_BAND = (SAFETY_DISTANCE + 0.2, SAFETY_DISTANCE + 0.7)  # goal distance to an avoid object
 MIN_START_GOAL = 3.0  # metres between start and goal
 CLEAR = ROBOT_RADIUS + 0.1  # start/goal clearance from any obstacle
+START_GOAL_CLEAR = 1.5  # pass_by: start/goal distance to every avoid object (> d + typical radius)
 
 
 @dataclass
@@ -37,25 +43,42 @@ class Task:
     goal_xz: tuple[float, float]  # GT world frame
 
 
-def make_tasks(setup: SceneSetup, n: int, seed: int = 0) -> list[Task]:
+def make_tasks(setup: SceneSetup, n: int, seed: int = 0, kind: str = "pass_by") -> list[Task]:
     s, rng, res = setup, np.random.default_rng(seed), setup.spec.res
     avoid = np.zeros(s.spec.shape, bool)
     for e in s.entities:
         avoid |= e.mask(s.spec.shape)
     d_avoid = distance_to(avoid, res)
     roomy = s.truth.free() & (distance_to(s.truth.occupied(), res) > CLEAR)
-    goals = np.argwhere(roomy & (d_avoid >= GOAL_BAND[0]) & (d_avoid <= GOAL_BAND[1]))
-    starts = np.argwhere(roomy & (d_avoid > GOAL_BAND[0]))
+    xs, zs = s.spec.cell_centers()
+    to_xz = lambda rc: (float(xs[rc[1]]), float(zs[rc[0]]))
+
+    if kind == "approach":
+        goals = np.argwhere(roomy & (d_avoid >= GOAL_BAND[0]) & (d_avoid <= GOAL_BAND[1]))
+        starts = np.argwhere(roomy & (d_avoid > GOAL_BAND[0]))
+    else:
+        goals = starts = np.argwhere(roomy & (d_avoid >= START_GOAL_CLEAR))
     if len(goals) == 0 or len(starts) == 0:
         return []
-    xs, zs = s.spec.cell_centers()
+
+    # pass_by: keep pairs whose shortest obstacle-only path grazes an avoid object
+    trav = s.truth.free() & ~dilate(s.truth.occupied(), ROBOT_RADIUS, res)
     tasks = []
-    for _ in range(100 * n):
+    for _ in range(80):
         if len(tasks) == n:
             break
-        g, st = goals[rng.integers(len(goals))], starts[rng.integers(len(starts))]
-        if np.hypot(*(g - st)) * res >= MIN_START_GOAL:
-            tasks.append(Task((float(xs[st[1]]), float(zs[st[0]])), (float(xs[g[1]]), float(zs[g[0]]))))
+        batch = []
+        while len(batch) < 2 * n:
+            g, st = goals[rng.integers(len(goals))], starts[rng.integers(len(starts))]
+            if np.hypot(*(g - st)) * res >= MIN_START_GOAL:
+                batch.append((tuple(st), tuple(g)))
+        if kind == "approach":
+            tasks += [Task(to_xz(a), to_xz(b)) for a, b in batch][: n - len(tasks)]
+            continue
+        paths = plan_many(trav, [a for a, _ in batch], [_disk(s.spec.shape, b, 0.0, res) for _, b in batch], res)
+        for (a, b), path in zip(batch, paths):
+            if path is not None and d_avoid[path[:, 0], path[:, 1]].min() < SAFETY_DISTANCE and len(tasks) < n:
+                tasks.append(Task(to_xz(a), to_xz(b)))
     return tasks
 
 

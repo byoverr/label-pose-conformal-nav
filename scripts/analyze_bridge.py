@@ -1,21 +1,28 @@
 """Sampling-based planners on calibrated (tightened) maps: solved-within-budget vs inflation.
 
-Reads results/tables/planner_bridge.csv; writes results/tables/planner_bridge_summary.csv and
-results/figures/planner_bridge.png.
+Reads results/tables/planner_bridge*.csv (parts are concatenated); writes
+results/tables/planner_bridge_summary.csv and results/figures/planner_bridge.png.
 """
 
+import argparse
 import csv
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from s2m.viz import INK, MUTED, setup
 
-PLANNERS = {"rrt_connect": ("RRT-Connect (uniform sampling)", "#eb6834", "s"),
-            "angle_zone": ("Bi-RRT with angle-limited zone", "#2a78d6", "o")}
+PLANNERS = {"rrt_connect": ("RRT-Connect, uniform sampling", "#eb6834", "s"),
+            "angle_zone": ("angle-limited zone, published rule", "#1baf7a", "^"),
+            "angle_zone_adaptive": ("angle-limited zone, widen on blocked extension", "#2a78d6", "o")}
 
 if __name__ == "__main__":
-    rows = list(csv.DictReader(open("results/tables/planner_bridge.csv")))
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tag", default="", help="'' for all avoid classes, '_pb' for plant + bike")
+    args = ap.parse_args()
+    rows = [r for p in sorted(Path("results/tables").glob(f"planner_bridge{args.tag}_[0-9]*.csv"))
+            for r in csv.DictReader(open(p))]
     scales = sorted({float(r["scale"]) for r in rows})
     summary = []
     for m in scales:
@@ -35,26 +42,43 @@ if __name__ == "__main__":
             entry[f"{pl}_time_median_s"] = float(np.median(ts)) if ts else np.nan
         summary.append(entry)
         print(entry)
-    with open("results/tables/planner_bridge_summary.csv", "w", newline="") as f:
+    with open(f"results/tables/planner_bridge{args.tag}_summary.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(summary[0]), lineterminator="\n")
         w.writeheader()
         w.writerows(summary)
 
+    # Anytime view: a run stops at its first solution, so "solved within budget B" is
+    # iterations <= B for every B below the 1500-extension budget actually used.
+    budgets = np.unique(np.round(np.logspace(0, np.log10(1500), 40)).astype(int))
+    ref_scale = 1.0 if 1.0 in scales else scales[-1]
+
     setup()
-    fig, axes = plt.subplots(1, 2, figsize=(9, 3.4))
+    fig, axes = plt.subplots(1, 3, figsize=(12, 3.5))
+    ax = axes[0]
+    ax.plot(scales, [s["solvable_frac"] for s in summary], color=INK, marker="x", label="solvable (exact grid search)")
+    ax.plot(scales, [s["free_frac"] for s in summary], color=MUTED, ls="--", marker="x", label="free space left")
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_title("Inflation narrows the free space")
+    ax.set_ylabel("fraction")
+    ax.legend(loc="upper right", fontsize=7)
+    ax = axes[1]
     for pl, (label, colour, marker) in PLANNERS.items():
-        axes[0].plot(scales, [s[f"{pl}_solved"] for s in summary], color=colour, marker=marker, label=label)
-        axes[1].plot(scales, [s[f"{pl}_iters_median"] for s in summary], color=colour, marker=marker, label=label)
-    axes[0].plot(scales, [s["solvable_frac"] for s in summary], color=MUTED, ls="--", marker="x",
-                 label="solvable at all (exact grid search)")
-    axes[0].set_ylabel("fraction of tasks")
-    axes[0].set_title("Solved within 1500 extensions (solvable tasks)")
-    axes[1].set_ylabel("extensions to first solution (median)")
-    axes[1].set_title("Search effort")
-    for ax in axes:
-        ax.set_xlabel("keep-out radius scale m (1 = calibrated joint radius)")
+        ps = [r for r in rows if float(r["scale"]) == ref_scale and r.get("planner") == pl]
+        its = np.array([int(r["iterations"]) if r["solved"] == "True" else np.inf for r in ps])
+        ax.plot(budgets, [(its <= b).mean() for b in budgets], color=colour, label=label)
+    ax.set_xscale("log")
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_xlabel("budget B, tree extensions")
+    ax.set_ylabel("solved within B (solvable tasks)")
+    ax.set_title(f"Anytime success at m = {ref_scale:g}")
+    ax.legend(loc="upper left", fontsize=7)
+    ax = axes[2]
+    for pl, (label, colour, marker) in PLANNERS.items():
+        ax.plot(scales, [s[f"{pl}_length_ratio_median"] for s in summary], color=colour, marker=marker, label=label)
+    ax.set_ylabel("first path length / shortest (median)")
+    ax.set_title("Quality of the first solution")
+    for ax in (axes[0], axes[2]):
+        ax.set_xlabel("keep-out radius scale m (1 = calibrated)")
         ax.set_xticks(scales)
-    axes[0].set_ylim(-0.02, 1.02)
-    axes[0].legend(loc="lower left", fontsize=7)
     fig.tight_layout()
-    fig.savefig("results/figures/planner_bridge.png")
+    fig.savefig(f"results/figures/planner_bridge{args.tag}.png")

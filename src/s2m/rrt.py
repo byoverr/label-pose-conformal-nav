@@ -27,6 +27,9 @@ class RRTConfig:
     p_cone: float = 0.7  # probability of a cone sample (vs uniform) when cone=True
     alpha_d: float = np.deg2rad(8.0)
     alpha_st: float = np.deg2rad(2.0)
+    # "sample": widen while cone samples fall into obstacles, reset after a free sample (as published);
+    # "extension": widen after every blocked extension, shrink by one step after a successful one.
+    widen_on: str = "sample"
 
 
 class GridChecker:
@@ -47,22 +50,34 @@ class GridChecker:
 
 
 class _Tree:
-    def __init__(self, root):
-        self.nodes, self.parent = [np.asarray(root, float)], [-1]
+    """Nodes in a growing preallocated array, so nearest-neighbour queries are one vector op."""
 
-    def nearest(self, p):
-        d = np.linalg.norm(np.asarray(self.nodes) - p, axis=1)
-        return int(np.argmin(d))
+    def __init__(self, root, capacity: int = 1024):
+        self._xy = np.empty((capacity, 2))
+        self._xy[0] = root
+        self.parent = [-1]
+        self.n = 1
 
-    def add(self, p, parent):
-        self.nodes.append(p)
+    @property
+    def nodes(self) -> np.ndarray:
+        return self._xy[: self.n]
+
+    def nearest(self, p) -> int:
+        d = self.nodes - p
+        return int(np.argmin(np.einsum("ij,ij->i", d, d)))
+
+    def add(self, p, parent) -> int:
+        if self.n == len(self._xy):
+            self._xy = np.concatenate([self._xy, np.empty_like(self._xy)])
+        self._xy[self.n] = p
         self.parent.append(parent)
-        return len(self.nodes) - 1
+        self.n += 1
+        return self.n - 1
 
     def path_to_root(self, i):
         out = []
         while i != -1:
-            out.append(self.nodes[i])
+            out.append(self._xy[i].copy())
             i = self.parent[i]
         return out
 
@@ -113,10 +128,20 @@ class _ConeSampler:
             na = grow.nodes[grow.nearest(q)]
             nb = other.nodes[other.nearest(na)]
             if _angle(q - na, nb - na) <= self.alpha:
-                free = self.chk.free(q)
-                self.alpha = self.cfg.alpha_d if free else min(np.pi, self.alpha + self.cfg.alpha_st)
+                if self.cfg.widen_on == "sample":
+                    free = self.chk.free(q)
+                    self.alpha = self.cfg.alpha_d if free else min(np.pi, self.alpha + self.cfg.alpha_st)
                 return q
         return self.rng.uniform(self.lo, self.hi)  # cone too narrow here: fall back to uniform
+
+    def feedback(self, extended: bool) -> None:
+        """Extension outcome of a cone sample (used by widen_on='extension')."""
+        if self.cfg.widen_on != "extension":
+            return
+        if extended:
+            self.alpha = max(self.cfg.alpha_d, self.alpha - self.cfg.alpha_st)
+        else:
+            self.alpha = min(np.pi, self.alpha + self.cfg.alpha_st)
 
 
 def rrt_connect(traversable: np.ndarray, start_rc, goal_rc, res: float, cfg: RRTConfig,
@@ -132,11 +157,11 @@ def rrt_connect(traversable: np.ndarray, start_rc, goal_rc, res: float, cfg: RRT
     cone = _ConeSampler(cfg, chk, lo, hi, rng) if cfg.cone else None
     a, b = start_tree, goal_tree
     for it in range(1, cfg.max_iter + 1):
-        if cone is not None and rng.random() < cfg.p_cone:
-            q = cone.sample(a, b)
-        else:
-            q = rng.uniform(lo, hi)
+        from_cone = cone is not None and rng.random() < cfg.p_cone
+        q = cone.sample(a, b) if from_cone else rng.uniform(lo, hi)
         new = _extend(a, q, cfg.step, chk)
+        if from_cone:
+            cone.feedback(new is not None)
         if new is not None:
             last, reached = _connect(b, a.nodes[new], cfg.step, chk)
             if reached:

@@ -4,6 +4,7 @@ Reads results/missions/*.csv and results/tables/scene_metrics.csv; writes
 results/tables/missions.csv, results/figures/missions_vs_drift.png, results/figures/miou_vs_violations.png.
 """
 
+import argparse
 import csv
 from pathlib import Path
 
@@ -35,7 +36,11 @@ def rate(rs, key):
 
 
 if __name__ == "__main__":
-    rows = load(sorted(p for p in Path("results/missions").glob("*.csv") if not p.name.startswith("params_")))
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dir", type=Path, default=Path("results/missions"))
+    ap.add_argument("--tag", default="", help="suffix for output files, e.g. _pb")
+    args = ap.parse_args()
+    rows = load(sorted(p for p in args.dir.glob("*.csv") if not p.name.startswith("params_")))
     print(f"{len(rows)} mission rows from {len({r['scene'] for r in rows})} scenes")
 
     table = []
@@ -54,7 +59,7 @@ if __name__ == "__main__":
                 "length_ratio_median": float(np.median(ratio)) if ratio else np.nan,
             })
     Path("results/tables").mkdir(parents=True, exist_ok=True)
-    with open("results/tables/missions.csv", "w", newline="") as f:
+    with open(f"results/tables/missions{args.tag}.csv", "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(table[0]), lineterminator="\n")
         w.writeheader()
         w.writerows(table)
@@ -81,7 +86,7 @@ if __name__ == "__main__":
     handles, labels = axes[1].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=4, bbox_to_anchor=(0.5, -0.12))
     fig.tight_layout(rect=(0, 0.06, 1, 1))
-    fig.savefig("results/figures/missions_vs_drift.png")
+    fig.savefig(f"results/figures/missions_vs_drift{args.tag}.png")
 
     # H4: map quality (mIoU at GT poses) vs safety of the uncalibrated planner at GT poses.
     metrics = {r["scene"]: r for r in csv.DictReader(open("results/tables/scene_metrics.csv"))}
@@ -104,6 +109,6 @@ if __name__ == "__main__":
     axes[0].set_ylabel("violation rate, uncalibrated planner")
     fig.suptitle("Does map quality predict mission safety? (one point per scene, L0)")
     fig.tight_layout()
-    fig.savefig("results/figures/miou_vs_violations.png")
-    with open("results/tables/h4_spearman.txt", "w") as f:
+    fig.savefig(f"results/figures/miou_vs_violations{args.tag}.png")
+    with open(f"results/tables/h4_spearman{args.tag}.txt", "w") as f:
         f.write(f"n_scenes={len(pts)} rho_miou={rho_m:.3f} p={p_m:.3f} rho_avoid_iou={rho_a:.3f} p={p_a:.3f}\n")

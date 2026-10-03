@@ -96,20 +96,28 @@ if __name__ == "__main__":
     fig.tight_layout(rect=(0, 0.04, 1, 1))
     fig.savefig(f"results/figures/coverage_by_class{args.tag}.png")
 
-    # Headline: coverage averaged over the two classes the detector localises reliably.
-    fig, ax = plt.subplots(figsize=(6.4, 3.6))
+    # Headline: the two classes the detector localises reliably; coverage and the price paid for it.
+    good = ("indoor_plant", "bike")
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.6))
+    ax = axes[0]
     ax.axhline(1 - args.alpha, color=MUTED, ls="--", lw=1)
-    ax.text(len(LEVELS) - 0.95, 1 - args.alpha + 0.015, f"target 1−α = {1 - args.alpha:.2f}",
-            color=MUTED, fontsize=8, ha="right", va="bottom")
+    ax.text(0.0, 1 - args.alpha - 0.02, f"target 1−α = {1 - args.alpha:.2f}", color=MUTED, fontsize=8, va="top")
     for arm in ("joint", "separate", "label_only", "pose_only", "uncalibrated"):
-        y = [np.mean([summarise(stats[lv], c, arm, "coverage", np.mean) for c in ("indoor_plant", "bike")])
-             for lv in LEVELS]
+        y = [np.mean([summarise(stats[lv], c, arm, "coverage", np.mean) for c in good]) for lv in LEVELS]
         arm_line(ax, arm, x, y)
-    ax.set_xticks(x, xt)
     ax.set_ylim(-0.02, 1.02)
-    ax.set_xlabel("pose drift level (ATE)")
     ax.set_ylabel("test coverage of true footprints")
-    ax.set_title("Indoor plants and bikes: which calibration survives pose drift?")
-    ax.legend(loc="lower left", fontsize=7)
+    ax.set_title("Coverage (plants and bikes)")
+    ax.legend(loc="center left", fontsize=7)
+    ax = axes[1]
+    for arm in ("joint", "separate", "label_only", "pose_only"):
+        y = [np.mean([summarise(stats[lv], c, arm, "radius", np.nanmedian) for c in good]) for lv in LEVELS]
+        arm_line(ax, arm, x, y)
+    ax.set_ylabel("calibrated keep-out radius, m")
+    ax.set_title("Price of the guarantee: extra keep-out distance")
+    for ax in axes:
+        ax.set_xticks(x, xt)
+        ax.set_xlabel("pose drift level (ATE)")
+    fig.tight_layout()
     fig.savefig(f"results/figures/coverage_headline{args.tag}.png")
     print("saved tables and figures")

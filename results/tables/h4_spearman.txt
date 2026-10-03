@@ -1,0 +1,1 @@
+n_scenes=18 rho_miou=-0.054 p=0.831 rho_avoid_iou=0.390 p=0.109

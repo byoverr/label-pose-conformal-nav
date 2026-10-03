@@ -60,11 +60,11 @@ class SceneSetup:
     truth: Map  # GT map in the GT world frame
 
 
-def prepare(scene: Scene, obs: list[FrameObs]) -> SceneSetup:
+def prepare(scene: Scene, obs: list[FrameObs], avoid_names=AVOID_CLASSES) -> SceneSetup:
     spec = fixed_spec(scene, obs)
     k = max(scene.classes) + 1
     truth = build_map(obs, scene.poses, spec, k, "gt", floor_class_ids(scene))
-    avoid = class_ids(scene.classes, AVOID_CLASSES)
+    avoid = class_ids(scene.classes, avoid_names)
     goals = class_ids(scene.classes, GOAL_CLASSES)
     return SceneSetup(scene, obs, spec, k, avoid, extract_entities(truth, avoid),
                       extract_entities(truth, goals), truth)

@@ -9,3 +9,4 @@ models/
 weights/
 results/*.log
 results/scores_smoke/
+results/archive/

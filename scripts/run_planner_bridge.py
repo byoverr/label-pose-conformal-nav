@@ -40,29 +40,33 @@ if __name__ == "__main__":
     ap.add_argument("--rrt-seeds", type=int, default=3)
     ap.add_argument("--budget", type=int, default=1500)
     ap.add_argument("--scales", type=float, nargs="+", default=[0.0, 0.5, 1.0, 1.5])
+    ap.add_argument("--part", default="0/1", help="i/n: process every n-th scene starting at i")
+    ap.add_argument("--avoid", nargs="+", default=list(AVOID_CLASSES), help="avoid classes used in planning")
+    ap.add_argument("--out", type=Path, default=Path("results/tables/planner_bridge.csv"))
     args = ap.parse_args()
 
     levels = load_levels("configs/drift_levels.yaml")
-    rows = load_scores(Path("results/scores"), exclude=DEV_SCENES)
-    scenes = sorted({r["scene"] for r in rows})
+    rows = load_scores(Path("results/scores"), exclude=DEV_SCENES)  # all scenes calibrate
+    all_scenes = sorted({r["scene"] for r in rows})
+    part, nparts = map(int, args.part.split("/"))
     by = {}
     for r in rows:
         by.setdefault((r["scene"], r["level"]), []).append(r)
 
     out = []
-    for name in scenes:
+    for name in all_scenes[part::nparts]:
         t0 = time.time()
         rng = np.random.default_rng(stable_seed(3, name))
-        others = [s for s in scenes if s != name]
+        others = [s for s in all_scenes if s != name]  # calibrate on every other scene
         cal = [by[(s, args.level)][rng.integers(len(by[(s, args.level)]))] for s in others]
         cal_L0 = [by[(s, "L0")][0] for s in others]
         scene = load_scene(Path("data/replica_cad") / name)
-        cls_ids = dict(zip(AVOID_CLASSES, class_ids(scene.classes, AVOID_CLASSES)))
+        cls_ids = dict(zip(args.avoid, class_ids(scene.classes, args.avoid)))
         per_class = {cid: calibrate_class(cal, cal_L0, cname, args.alpha) for cname, cid in cls_ids.items()}
         joint = {cid: pc["joint"] for cid, pc in per_class.items()}
         fallback = {cid: None if pc["pose_only"] is None else pc["pose_only"].radius for cid, pc in per_class.items()}
         setup = prepare(scene, precompute_observations(
-            scene, load_detections(Path("data/cache/detections") / f"{name}.npz")))
+            scene, load_detections(Path("data/cache/detections") / f"{name}.npz")), args.avoid)
         tasks = make_tasks(setup, args.tasks, seed=0)
         est = simulate(scene.poses, levels[args.level], np.random.default_rng(stable_seed(7, 0, name)))
         D_q = world_correction(est, scene.poses)[-1]
@@ -87,9 +91,10 @@ if __name__ == "__main__":
                                 "solvable": False, "free_frac": free_frac})
                     continue
                 ref_len = path_length(ref, res)
-                for planner, cone in (("rrt_connect", False), ("angle_zone", True)):
+                for planner, cone, widen in (("rrt_connect", False, "sample"), ("angle_zone", True, "sample"),
+                                             ("angle_zone_adaptive", True, "extension")):
                     for seed in range(args.rrt_seeds):
-                        cfg = RRTConfig(cone=cone, max_iter=args.budget, goal_tol=GOAL_TOL)
+                        cfg = RRTConfig(cone=cone, widen_on=widen, max_iter=args.budget, goal_tol=GOAL_TOL)
                         t = time.time()
                         path, it = rrt_connect(trav, s_rc, g_rc, res, cfg, np.random.default_rng(stable_seed(seed, ti, name)))
                         out.append({"scene": name, "scale": m, "task": ti,
@@ -100,10 +105,10 @@ if __name__ == "__main__":
         radii = ", ".join(f"{scene.classes[c]}={'abstain' if p is None else f'{p.radius:.2f}'}" for c, p in joint.items())
         print(f"{name}: joint radii {radii}; {len(cells)} tasks, {time.time() - t0:.0f} s", flush=True)
 
-    Path("results/tables").mkdir(parents=True, exist_ok=True)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
     keys = ["scene", "scale", "task", "solvable", "free_frac", "planner", "seed", "solved",
             "iterations", "time_s", "ref_length", "length_ratio"]
-    with open("results/tables/planner_bridge.csv", "w", newline="") as f:
+    with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=keys, lineterminator="\n")
         w.writeheader()
         w.writerows(out)

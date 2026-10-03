@@ -44,9 +44,14 @@ def calibrated_params(rows, cal_scenes, levels, alpha, rng, cls_ids):
     return params, fallback
 
 
-def write_csv(path, rows):
+MISSION_FIELDS = ["scene", "level", "seed", "task", "arm", "abstained", "classes_fell_back", "planned",
+                  "violation", "collision", "reached", "length", "success", "oracle_length"]
+
+
+def write_csv(path, rows, fields=None):
+    """Header-only file when there are no rows (e.g. a scene without valid tasks): resumable runs skip it."""
     with open(path, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
+        w = csv.DictWriter(fh, fieldnames=fields or list(rows[0]), lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
 
@@ -60,6 +65,8 @@ if __name__ == "__main__":
     ap.add_argument("--alpha", type=float, default=0.1)
     ap.add_argument("--seeds", type=int, default=5)
     ap.add_argument("--tasks", type=int, default=20)
+    ap.add_argument("--part", default="0/1", help="i/n: process every n-th scene starting at i")
+    ap.add_argument("--avoid", nargs="+", default=list(AVOID_CLASSES), help="avoid classes used in planning")
     args = ap.parse_args()
 
     levels = load_levels(args.levels)
@@ -67,13 +74,14 @@ if __name__ == "__main__":
     scenes = sorted({r["scene"] for r in rows})
     args.out.mkdir(parents=True, exist_ok=True)
 
-    for name in scenes:
+    part, nparts = map(int, args.part.split("/"))
+    for name in scenes[part::nparts]:
         out = args.out / f"{name}.csv"
         if out.exists():
             continue
         t = time.time()
         scene = load_scene(args.data / name)
-        cls_ids = dict(zip(AVOID_CLASSES, class_ids(scene.classes, AVOID_CLASSES)))
+        cls_ids = dict(zip(args.avoid, class_ids(scene.classes, args.avoid)))
         params, fallback = calibrated_params(rows, [s for s in scenes if s != name], levels,
                                              args.alpha, np.random.default_rng(stable_seed(0, name)), cls_ids)
         write_csv(args.out / f"params_{name}.csv",
@@ -84,7 +92,7 @@ if __name__ == "__main__":
                    for p in [params[lv][arm][cid]]])
 
         setup = prepare(scene, precompute_observations(
-            scene, load_detections(Path("data/cache/detections") / f"{name}.npz")))
+            scene, load_detections(Path("data/cache/detections") / f"{name}.npz")), args.avoid)
         tasks = make_tasks(setup, args.tasks, seed=0)
         results = []
         for lv, model in levels.items():
@@ -92,5 +100,5 @@ if __name__ == "__main__":
                 est = simulate(scene.poses, model, np.random.default_rng(stable_seed(7, seed, name)))
                 for r in run_realization(setup, tasks, est, params[lv], fallback[lv]):
                     results.append({"scene": name, "level": lv, "seed": seed, **r})
-        write_csv(out, results)
+        write_csv(out, results, MISSION_FIELDS)
         print(f"{name}: {len(tasks)} tasks, {len(results)} rows, {time.time() - t:.0f} s", flush=True)
