@@ -20,9 +20,9 @@ import yaml
 from s2m.conformal import label_score, miss_distance
 from s2m.data import Scene
 from s2m.drift import DriftModel, ate, endpoint_drift, simulate, world_correction
-from s2m.entities import AVOID_CLASSES, Entity, class_ids, extract_entities
+from s2m.entities import AVOID_CLASSES, GOAL_CLASSES, Entity, class_ids, extract_entities
 from s2m.grid import GridSpec
-from s2m.mapping import FrameObs, build_map, fixed_spec, floor_class_ids
+from s2m.mapping import FrameObs, Map, build_map, fixed_spec, floor_class_ids
 
 LAMBDAS = np.round(np.arange(0.0, 1.0001, 0.01), 2)  # label thresholds evaluated for the pred map
 R_MAX = 3.0  # metres; a larger miss means the class is effectively missing from the map
@@ -55,6 +55,8 @@ class SceneSetup:
     n_classes: int
     avoid_ids: list[int]
     entities: list[Entity]  # avoid-class entities in the GT world frame
+    goal_entities: list[Entity]  # goal-class entities in the GT world frame
+    truth: Map  # GT map in the GT world frame
 
 
 def prepare(scene: Scene, obs: list[FrameObs]) -> SceneSetup:
@@ -62,7 +64,9 @@ def prepare(scene: Scene, obs: list[FrameObs]) -> SceneSetup:
     k = max(scene.classes) + 1
     truth = build_map(obs, scene.poses, spec, k, "gt", floor_class_ids(scene))
     avoid = class_ids(scene.classes, AVOID_CLASSES)
-    return SceneSetup(scene, obs, spec, k, avoid, extract_entities(truth, avoid))
+    goals = class_ids(scene.classes, GOAL_CLASSES)
+    return SceneSetup(scene, obs, spec, k, avoid, extract_entities(truth, avoid),
+                      extract_entities(truth, goals), truth)
 
 
 def realization_scores(setup: SceneSetup, est_poses: np.ndarray) -> dict:
