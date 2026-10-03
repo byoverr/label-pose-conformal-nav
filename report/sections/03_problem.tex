@@ -15,7 +15,7 @@ A_\lambda(k) = \{\, j : j \text{ занята},\; p_j(k) \ge \lambda \,\}.
 s_k(\Omega) = \min\Big\{ R_{\max},\; \max_{e:\,k_e = k}\; \max_{x \in \hat F(e)} \operatorname{dist}\big(x, A_\lambda(k)\big) \Big\}.
 \label{eq:miss}
 \end{equation}
-Неверная метка (объект не попал в $A_\lambda(k)$) даёт большой промах, сдвиг из-за позы --- промах на величину сдвига; поэтому одна величина поглощает оба источника ошибки. Порог $\hat q_k$ --- порядковая статистика с номером $\lceil (n+1)(1-\alpha) \rceil$ среди $s_k(\Omega_1), \dots, s_k(\Omega_n)$. При обменяемости сцен
+Неверная метка (объект не попал в $A_\lambda(k)$) даёт большой промах, сдвиг из-за позы --- промах на величину сдвига; поэтому одна величина поглощает оба источника ошибки. Порог $\hat q_k$ --- порядковая статистика с номером $\lceil (n+1)(1-\alpha) \rceil$ среди $s_k(\Omega_1), \dots, s_k(\Omega_n)$ (split conformal prediction~\cite{gentle}). При обменяемости сцен
 \begin{equation}
 P\Big( \hat F(e) \subseteq A_\lambda(k) \oplus B(\hat q_k)\ \ \forall e: k_e = k \Big) \ge 1 - \alpha,
 \label{eq:guarantee}
