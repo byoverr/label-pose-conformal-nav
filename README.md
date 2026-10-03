@@ -32,14 +32,23 @@ Full write-up (in Russian): [`report/report.pdf`](report/report.pdf). Decision l
    that fallback nearly immobilises the robot.
 6. **Map quality does not predict mission safety:** Spearman ρ = −0.16 (p = 0.57) between scene mIoU and the
    violation rate of the uncalibrated planner.
-7. **Raising the risk level does not buy feasibility.** From α = 0.1 to 0.3 the joint radius shrinks only from
+7. **Against the closest method, in its own setting.** On the same scenes with known poses, a closed 5-class
+   vocabulary, 1 − α = 0.95 and unselected start/goal tasks, per-cell label calibration (Sundarsingh et al.-style)
+   and ours are **equal** (mission success 0.43 vs 0.42, no unsafe missions). With 3 cm / 9.5 cm drift its
+   coverage falls to 0.42 / 0.10 while ours stays at 0.94 with more successful missions (0.61 / 0.50 vs
+   0.40 / 0.32). With the open vocabulary ours succeeds **1.8× more often** already at known pose (0.78 vs 0.43):
+   label-set calibration degenerates to "every occupied cell is hazardous" (λ* = 0) at every grid size tried,
+   5 cm to 1 m, because some objects are partly missed by the detector altogether
+   ([comparison](results/figures/comparison.png)). On unselected tasks the joint arm finds a safe path in 78 %
+   (known pose) to 68 % (9.5 cm drift) of tasks; the 30 % above is for deliberately hard pass-by tasks.
+8. **Raising the risk level does not buy feasibility.** From α = 0.1 to 0.3 the joint radius shrinks only from
    0.81 to 0.60 m (plant) and 0.75 to 0.50 m (bike), and the share of tasks with a path stays at 30–31 % (L3):
    the floor is set by perception error, not by the risk level ([α sweep](results/figures/alpha_sweep.png)).
-8. **Separate calibration fails when failures are rare and hit different scenes.** With real label errors and
+9. **Separate calibration fails when failures are rare and hit different scenes.** With real label errors and
    injected scene-level localization failures, the sum of separate quantiles covers 0.80–0.84 when the failures
    coincide with bad labels but only **0.66 at a 0.70 target** when they occur in scenes with good labels; the joint
    quantile stays at 0.71–0.78 in every configuration. The sum of quantiles only guarantees 1 − 2α.
-9. **The three simplifications, checked one by one.**
+10. **The three simplifications, checked one by one.**
    - *MobileSAM masks:* the typical bike miss drops from 0.43 to 0.05 m, but the worst scene, which sets the
      quantile at 13 calibration scenes, does not change (0.75 m).
    - *Real RGB-D visual odometry* (Open3D, frame to frame, no loop closure): median ATE 78 cm with a heavy tail
@@ -47,7 +56,7 @@ Full write-up (in Russian): [`report/report.pdf`](report/report.pdf). Decision l
      (0.93) but abstains in most splits: there is no useful certificate at this pose quality, and it says so.
    - *HM3D scenes* calibrated on ReplicaCAD: one of two visible plants is missed entirely, so the guarantee does
      not transfer between scene families (2 scenes: an illustration, not an estimate).
-10. **Planner side (thesis bridge):** on calibrated maps the angle-limited sampling zone of a bidirectional RRT needs
+11. **Planner side (thesis bridge):** on calibrated maps the angle-limited sampling zone of a bidirectional RRT needs
    2–3× more tree extensions than uniform sampling; widening the zone after blocked extensions brings this to
    1.1–1.4× and gives the shortest first paths (1.11–1.15 vs 1.15–1.21 of optimal). Free space, not search, limits
    solvability.
@@ -134,6 +143,11 @@ of the real plant, and the shortest path grazes it; the joint zone (blue) covers
 
 ![planners](results/figures/planner_bridge_pb.png)
 
+**Against the closest method** — per-cell label calibration vs joint miss distance on unselected tasks, in its
+setting (top) and ours (bottom):
+
+![comparison](results/figures/comparison.png)
+
 **The price of the guarantee vs the risk level α** (drift L3):
 
 ![alpha](results/figures/alpha_sweep.png)
@@ -168,6 +182,14 @@ for a in 0.05 0.2 0.3; do .venv/bin/python scripts/analyze_coverage.py --alpha $
 for a in 0.05 0.2 0.3; do .venv/bin/python scripts/run_missions.py --alpha $a --avoid indoor_plant bike --out results/missions_pb_a$(echo $a | tr -d .); done
 .venv/bin/python scripts/analyze_alpha.py --level L3
 .venv/bin/python scripts/composition_stress.py --alpha 0.3 --fail-level L5
+# comparison with per-cell label calibration in its setting (closed vocabulary, 95 %, random tasks)
+.venv/bin/python scripts/run_detector.py data/replica_cad/* --closed indoor_plant bike tv_stand sofa table --cache data/cache/detections_closed5
+.venv/bin/python scripts/compute_scores.py data/replica_cad/* --detections data/cache/detections_closed5 --out results/scores_closed5
+.venv/bin/python scripts/analyze_coverage.py --scores results/scores_closed5 --alpha 0.05 --tag _closed5_a005
+.venv/bin/python scripts/run_missions.py --kind random --alpha 0.05 --scores results/scores_closed5 --detections data/cache/detections_closed5 --only L0 L2 L3 --avoid indoor_plant bike --out results/missions_rand_closed5_a005
+.venv/bin/python scripts/run_missions.py --kind random --avoid indoor_plant bike --out results/missions_rand
+.venv/bin/python scripts/compare_known_pose.py
+.venv/bin/python scripts/grid_resolution.py --res 0.05 0.25 0.5 1.0
 # variants: MobileSAM masks, real visual odometry, HM3D
 .venv/bin/python scripts/run_segmenter.py data/replica_cad/*          # downloads models/mobile_sam.pt (40 MB) once
 .venv/bin/python scripts/compute_scores.py data/replica_cad/* --masks data/cache/masks_sam --out results/scores_sam
