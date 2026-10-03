@@ -1,0 +1,15 @@
+scene,level,seed,task,arm,abstained,classes_fell_back,planned,violation,collision,reached,length,success,oracle_length
+v3_sc0_staging_00,L0,0,0,uncalibrated,False,0,True,False,False,True,6.427817459305203,True,6.427817459305203
+v3_sc0_staging_00,L0,0,0,label_cell,False,0,False,False,False,False,nan,False,6.427817459305203
+v3_sc0_staging_00,L0,0,0,label_only,False,0,False,False,False,False,nan,False,6.427817459305203
+v3_sc0_staging_00,L0,0,0,pose_only,False,0,True,False,False,True,6.427817459305203,True,6.427817459305203
+v3_sc0_staging_00,L0,0,0,separate,False,0,False,False,False,False,nan,False,6.427817459305203
+v3_sc0_staging_00,L0,0,0,joint,False,0,False,False,False,False,nan,False,6.427817459305203
+v3_sc0_staging_00,L0,0,0,oracle,False,0,True,False,False,True,6.427817459305203,True,6.427817459305203
+v3_sc0_staging_00,VO2,0,0,uncalibrated,False,0,False,False,False,False,nan,False,6.731980515339467
+v3_sc0_staging_00,VO2,0,0,label_cell,False,0,False,False,False,False,nan,False,6.731980515339467
+v3_sc0_staging_00,VO2,0,0,label_only,False,0,False,False,False,False,nan,False,6.731980515339467
+v3_sc0_staging_00,VO2,0,0,pose_only,True,1,False,False,False,False,nan,False,6.731980515339467
+v3_sc0_staging_00,VO2,0,0,separate,True,1,False,False,False,False,nan,False,6.731980515339467
+v3_sc0_staging_00,VO2,0,0,joint,True,1,False,False,False,False,nan,False,6.731980515339467
+v3_sc0_staging_00,VO2,0,0,oracle,False,0,True,False,False,True,6.731980515339467,True,6.731980515339467
