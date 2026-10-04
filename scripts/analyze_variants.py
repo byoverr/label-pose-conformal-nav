@@ -27,7 +27,9 @@ SHOW_ARMS = ("uncalibrated", "label_only", "pose_only", "separate", "joint")
 def summary(stats, cls, arm):
     st = stats[cls][arm]
     r = np.array(st["radius"], float)
-    return {"coverage_mean": float(np.mean(st["coverage"])), "abstain_rate": float(np.mean(st["abstain"])),
+    cov, ab = np.array(st["coverage"], float), np.array(st["abstain"], float)
+    return {"coverage_mean": float(cov.mean()), "abstain_rate": float(ab.mean()),
+            "coverage_cert": float(cov[ab == 0].mean()) if (ab == 0).any() else np.nan,
             "radius_median": float(np.nanmedian(r)) if np.isfinite(r).any() else np.nan}
 
 

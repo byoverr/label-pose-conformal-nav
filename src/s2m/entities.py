@@ -19,11 +19,17 @@ AVOID_CLASSES = ("indoor_plant", "tv_stand", "bike")
 @dataclass
 class Entity:
     cls: int
-    cells: np.ndarray  # (n, 2) int (row, col) footprint cells in the map's grid
+    cells: np.ndarray  # (n, 2) int (row, col) footprint cells; may lie off the grid after a pose shift
+
+    def inside(self, shape: tuple[int, int]) -> np.ndarray:
+        r, c = self.cells[:, 0], self.cells[:, 1]
+        return (r >= 0) & (r < shape[0]) & (c >= 0) & (c < shape[1])
 
     def mask(self, shape: tuple[int, int]) -> np.ndarray:
+        """Footprint cells that lie on the grid."""
         m = np.zeros(shape, bool)
-        m[self.cells[:, 0], self.cells[:, 1]] = True
+        ok = self.inside(shape)
+        m[self.cells[ok, 0], self.cells[ok, 1]] = True
         return m
 
 

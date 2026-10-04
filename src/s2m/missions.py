@@ -25,10 +25,12 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
+from scipy import ndimage
+
 from s2m.analysis import ArmParams
-from s2m.conformal import distance_to
+from s2m.conformal import distance_from, distance_to
 from s2m.drift import world_correction
-from s2m.experiment import SceneSetup, transform_entities
+from s2m.experiment import R_MAX, SceneSetup, transform_entities
 from s2m.mapping import build_map, floor_class_ids
 from s2m.planning import ROBOT_RADIUS, SAFETY_DISTANCE, dilate, evaluate_path, plan_many
 
@@ -104,8 +106,9 @@ def keepout(pred, avoid_ids, params: dict[int, ArmParams | None], fallback: dict
             res: float) -> np.ndarray | None:
     """Keep-out cells of one arm, or None if the arm cannot certify the mission.
 
-    A class whose certificate abstains falls back to geometry: every occupied cell may be that
-    class, inflated by the class's pose-only radius. Same rule for every arm.
+    A class whose certificate abstains falls back to the class-agnostic certificate: every occupied
+    cell may be that class, inflated by the calibrated geometry-only radius (fallback[k]; valid on
+    its own, see s2m.analysis). Same rule for every arm.
     """
     keep = np.zeros(pred.spec.shape, bool)
     for k in avoid_ids:
@@ -117,6 +120,14 @@ def keepout(pred, avoid_ids, params: dict[int, ArmParams | None], fallback: dict
         else:
             return None
     return keep
+
+
+def _exposed(trav: np.ndarray, starts, d_avoid: np.ndarray) -> bool:
+    """Worst case over all plans: can the robot reach, from some task start, a cell closer than
+    SAFETY_DISTANCE to a true avoid object without leaving the arm's traversable set?"""
+    labels, _ = ndimage.label(trav, structure=np.ones((3, 3)))
+    ids = {int(labels[st]) for st in starts if st is not None} - {0}
+    return bool(ids) and bool((np.isin(labels, list(ids)) & (d_avoid < SAFETY_DISTANCE)).any())
 
 
 def run_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,
@@ -132,10 +143,9 @@ def run_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,
     # Truth in the planner frame: the GT map moved rigidly by the query-time pose error.
     truth = build_map(s.obs, D_q[None] @ s.scene.poses, s.spec, s.n_classes, "gt",
                       floor_class_ids(s.scene))
-    avoid_true = np.zeros(shape, bool)
-    for e in transform_entities(s.entities, s.spec, D_q):
-        avoid_true |= e.mask(shape)
-    d_avoid, d_obst = distance_to(avoid_true, res), distance_to(truth.occupied(), res)
+    moved = [e.cells for e in transform_entities(s.entities, s.spec, D_q)]
+    d_avoid = distance_from(np.concatenate(moved) if moved else np.zeros((0, 2), int), shape, res, R_MAX)
+    d_obst = distance_to(truth.occupied(), res)
 
     cells = [(to_cell(s.spec, t.start_xz, D_q), to_cell(s.spec, t.goal_xz, D_q)) for t in tasks]
     valid = [i for i, (a, b) in enumerate(cells) if a is not None and b is not None]
@@ -146,15 +156,16 @@ def run_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,
     pred = build_map(s.obs, est_poses, s.spec, s.n_classes, "det")
     base = pred.free() & ~dilate(pred.occupied(), ROBOT_RADIUS, res)
 
-    plans, abstained, fell_back = {}, {}, {}
+    plans, abstained, fell_back, exposed = {}, {}, {}, {}
     for arm, params in arms.items():
         keep = keepout(pred, s.avoid_ids, params, fallback, res)
         abstained[arm] = keep is None
         fell_back[arm] = sum(params[k] is None for k in s.avoid_ids)
+        exposed[arm] = keep is not None and _exposed(base & ~keep, starts, d_avoid)
         plans[arm] = [None] * len(tasks) if keep is None else _plan_subset(base & ~keep, starts, goal_masks, valid, res)
 
     oracle_trav = (truth.free() & ~dilate(truth.occupied(), ROBOT_RADIUS, res)
-                   & ~dilate(avoid_true, SAFETY_DISTANCE, res))
+                   & (d_avoid > SAFETY_DISTANCE))
     plans["oracle"] = _plan_subset(oracle_trav, starts, goal_masks, valid, res)
 
     rows = []
@@ -166,6 +177,7 @@ def run_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,
             rows.append({"task": i, "arm": arm,
                          "abstained": abstained.get(arm, False),
                          "classes_fell_back": fell_back.get(arm, 0),
+                         "exposed": exposed.get(arm, False),
                          **asdict(o), "success": o.success, "oracle_length": oracle_len})
     return rows
 

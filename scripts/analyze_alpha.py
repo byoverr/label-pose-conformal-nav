@@ -1,13 +1,14 @@
 """Risk level alpha vs coverage, keep-out radius and mission feasibility (the price of the guarantee).
 
 Reads results/tables/coverage{_a005,,_a02,_a03}.csv (scripts/analyze_coverage.py) and
-results/missions_pb{_a005,,_a02,_a03}/ (scripts/run_missions.py); writes
-results/tables/alpha_sweep.csv and results/figures/alpha_sweep.png.
+results/missions_pb{_a005,,_a02,_a03}/ and results/missions_rand{_a005,,_a03}/ (scripts/run_missions.py);
+writes results/tables/alpha_sweep.csv and results/figures/alpha_sweep.png.
 
 Example: python scripts/analyze_alpha.py --level L3
 """
 
 import argparse
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,11 +36,13 @@ if __name__ == "__main__":
     args = ap.parse_args()
 
     table = []
-    for alpha, tag in ALPHAS.items():
+    for (kind, prefix), (alpha, tag) in [(k, a) for k in (("pass_by", "pb"), ("random", "rand")) for a in ALPHAS.items()]:
+        if not Path(f"results/missions_{prefix}{tag}").is_dir():
+            continue
         cov = coverage_rows(tag, args.level)
-        mis = [r for r in mission_rows(f"results/missions_pb{tag}") if r["level"] == args.level]
+        mis = [r for r in mission_rows(f"results/missions_{prefix}{tag}") if r["level"] == args.level]
         for arm in ARMS + ("uncalibrated", "oracle"):
-            row = {"alpha": alpha, "level": args.level, "arm": arm,
+            row = {"tasks": kind, "alpha": alpha, "level": args.level, "arm": arm,
                    "planned": arm_rate(mis, arm, "planned"), "violation": arm_rate(mis, arm, "violation"),
                    "success": arm_rate(mis, arm, "success")}
             for cls in CLASSES:
@@ -49,13 +52,13 @@ if __name__ == "__main__":
             table.append(row)
     write_csv("results/tables/alpha_sweep.csv", table)
     for t in table:
-        print(f"alpha {t['alpha']:.2f} {t['arm']:12s} planned {t['planned']:.2f} viol {t['violation']:.3f} "
+        print(f"{t['tasks']:7s} alpha {t['alpha']:.2f} {t['arm']:12s} planned {t['planned']:.2f} viol {t['violation']:.3f} "
               + " ".join(f"{c}: cov {t[f'coverage_mean_{c}']:.2f} r {t[f'radius_median_{c}']:.2f} "
                          f"abst {t[f'abstain_rate_{c}']:.2f}" for c in CLASSES))
 
     setup()
     al = np.array(list(ALPHAS))
-    get = lambda arm, key: np.array([t[key] for t in table if t["arm"] == arm])
+    get = lambda arm, key: np.array([t[key] for t in table if t["arm"] == arm and t["tasks"] == "pass_by"])
     fig, axes = plt.subplots(1, 3, figsize=(11, 3.4))
     ax = axes[0]
     ax.plot(al, 1 - al, color=MUTED, lw=1, label="target 1 - alpha")

@@ -51,3 +51,16 @@ def test_label_score_uses_one_minus_probability_and_flags_unobserved():
     assert label_score(m, [e]) == pytest.approx(0.3)
     m.n_obs[12, 12] = 0  # one footprint cell unobserved in the prediction
     assert label_score(m, [e]) == 2.0
+
+
+def test_footprint_pushed_off_the_grid_is_still_measured():
+    region = np.zeros((40, 40), bool)
+    region[10:15, 0:5] = True
+    e = Entity(1, np.argwhere(np.ones((5, 5), bool)) + [10, -8])  # columns -8..-4, off the grid
+    assert miss_distance({1: region}, [e], 0.05, r_max=3.0) == pytest.approx(8 * 0.05)
+    far = Entity(1, np.array([[10, -500]]))  # farther than r_max outside the grid
+    assert miss_distance({1: region}, [far], 0.05, r_max=3.0) == 3.0
+    m = empty_map()
+    m.n_obs[:] = 10
+    m.class_mass[:, :, 1] = 10.0
+    assert label_score(m, [e]) == 2.0  # no label set can hold a cell the map does not have

@@ -35,16 +35,17 @@ def load_levels(path) -> dict[str, DriftModel]:
 
 
 def transform_entities(entities: list[Entity], spec: GridSpec, D: np.ndarray) -> list[Entity]:
-    """Move entity footprints by the planar rigid transform D (4x4) and re-rasterize."""
+    """Move entity footprints by the planar rigid transform D (4x4) and re-rasterize.
+
+    Cells pushed off the grid are kept: the object is still there, the map just does not reach it.
+    """
     out = []
     for e in entities:
         x = spec.x0 + (e.cells[:, 1] + 0.5) * spec.res
         z = spec.z0 + (e.cells[:, 0] + 0.5) * spec.res
         p = np.stack([x, np.zeros_like(x), z], 1) @ D[:3, :3].T + D[:3, 3]
-        r, c, inside = spec.to_cell(p[:, 0], p[:, 2])
-        cells = np.unique(np.stack([r[inside], c[inside]], 1), axis=0)
-        if len(cells):
-            out.append(Entity(e.cls, cells))
+        r, c, _ = spec.to_cell(p[:, 0], p[:, 2])
+        out.append(Entity(e.cls, np.unique(np.stack([r, c], 1), axis=0)))
     return out
 
 
@@ -82,8 +83,11 @@ def realization_scores(setup: SceneSetup, est_poses: np.ndarray) -> dict:
         name = s.scene.classes[k]
         ek = [e for e in ents if e.cls == k]
         row[f"n_ent_{name}"] = len(ek)
+        row[f"off_grid_{name}"] = sum(not e.inside(s.spec.shape).all() for e in ek)
         row[f"label_score_{name}"] = label_score(pred, ek)
-        row[f"miss_gtlab_{name}"] = miss_distance({k: gtlab.class_mass[:, :, k] >= 2}, ek, s.spec.res, R_MAX)
+        # same rule as the true footprints (extract_entities): occupied cells with >= 2 points of k
+        gt_region = gtlab.occupied() & (gtlab.class_mass[:, :, k] >= 2)
+        row[f"miss_gtlab_{name}"] = miss_distance({k: gt_region}, ek, s.spec.res, R_MAX)
         for lam in LAMBDAS:
             row[f"miss_pred_{name}_{lam:.2f}"] = miss_distance({k: pred.region(k, lam)}, ek, s.spec.res, R_MAX)
     return row

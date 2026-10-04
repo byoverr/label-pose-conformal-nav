@@ -31,8 +31,9 @@ from s2m.missions import make_tasks, run_realization
 from s2m.odometry import vo_poses
 from s2m.perception import load_detections, load_masks
 
-MISSION_FIELDS = ["scene", "level", "seed", "task", "arm", "abstained", "classes_fell_back", "planned",
-                  "violation", "collision", "reached", "length", "success", "oracle_length"]
+MISSION_FIELDS = ["scene", "level", "seed", "task", "arm", "abstained", "classes_fell_back", "exposed", "planned",
+                  "violation", "collision", "reached", "length", "clearance", "obst_clearance", "success",
+                  "oracle_length"]
 
 
 if __name__ == "__main__":

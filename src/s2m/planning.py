@@ -82,10 +82,13 @@ def path_length(path: np.ndarray, res: float) -> float:
 class Outcome:
     planned: bool
     violation: bool = False  # came closer than SAFETY_DISTANCE to a true avoid object
-    collision: bool = False  # came closer than ROBOT_RADIUS to a true obstacle
+    collision: bool = False  # came closer than ROBOT_RADIUS to a true obstacle, with one cell of
+    # tolerance: the obstacle map is not calibrated, and a one-cell rasterisation shift is not a crash
     reached: bool = False  # ended within `reach` of the goal (always true for a found path when the
     # goal is given in the planner frame, as in s2m.missions; kept as a consistency check)
     length: float = np.nan
+    clearance: float = np.nan  # smallest distance to a true avoid object along the path
+    obst_clearance: float = np.nan  # smallest distance to a true obstacle along the path
 
     @property
     def success(self) -> bool:
@@ -94,14 +97,17 @@ class Outcome:
 
 def evaluate_path(path: np.ndarray | None, true_avoid_dist: np.ndarray, true_obst_dist: np.ndarray,
                   true_goal_dist: np.ndarray, res: float, reach: float) -> Outcome:
-    """Judge a planned path against the truth (distance fields in the planner frame)."""
+    """Judge a planned path against the truth (distance fields between cell centres, planner frame)."""
     if path is None:
         return Outcome(planned=False)
     r, c = path[:, 0], path[:, 1]
+    clearance, obst = float(true_avoid_dist[r, c].min()), float(true_obst_dist[r, c].min())
     return Outcome(
         planned=True,
-        violation=bool(true_avoid_dist[r, c].min() < SAFETY_DISTANCE - res),
-        collision=bool(true_obst_dist[r, c].min() < ROBOT_RADIUS - res),
+        violation=clearance < SAFETY_DISTANCE,
+        collision=obst < ROBOT_RADIUS - res,
         reached=bool(true_goal_dist[r[-1], c[-1]] <= reach + res),
         length=path_length(path, res),
+        clearance=clearance,
+        obst_clearance=obst,
     )

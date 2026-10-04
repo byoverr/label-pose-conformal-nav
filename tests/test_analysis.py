@@ -81,3 +81,13 @@ def test_map_class_names_precedence():
              "first_word": {"ceiling": "ceiling"}}
     lut = map_class_names(names, target, rules)
     assert [target[lut[i]] for i in range(6)] == ["indoor_plant", "wall", "ceiling", "other", "bike", "other"]
+
+
+def test_transform_entities_keeps_cells_pushed_off_the_grid():
+    spec = GridSpec(0.0, 0.0, 0.05, (40, 40))
+    e = Entity(1, np.array([[10, 1], [10, 2]]))
+    D = np.eye(4)
+    D[0, 3] = -0.25  # 5 columns to the left: both cells leave the grid
+    moved = transform_entities([e], spec, D)[0]
+    assert np.array_equal(moved.cells, e.cells - [0, 5])
+    assert not moved.inside(spec.shape).any() and not moved.mask(spec.shape).any()

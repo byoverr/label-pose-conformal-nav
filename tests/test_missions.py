@@ -56,3 +56,17 @@ def test_make_tasks_respects_the_pass_by_rules():
         assert d[sr[0], sc[0]] >= START_GOAL_CLEAR and d[gr[0], gc[0]] >= START_GOAL_CLEAR
         assert np.hypot(t.start_xz[0] - t.goal_xz[0], t.start_xz[1] - t.goal_xz[1]) >= MIN_START_GOAL - res
     assert make_tasks(setup, 5, seed=0, kind="random")
+
+
+def test_exposure_flags_a_reachable_cell_near_the_true_object():
+    from s2m.conformal import distance_to
+    from s2m.missions import _exposed
+
+    trav = np.ones((20, 40), bool)
+    trav[:, 20] = False  # a wall splits the free space
+    obj = np.zeros((20, 40), bool)
+    obj[10, 35] = True  # true object in the right half
+    d = distance_to(obj, 0.05)
+    assert _exposed(trav, [(10, 30)], d)
+    assert not _exposed(trav, [(10, 5)], d)  # unreachable from the left half
+    assert not _exposed(trav & (d > SAFETY_DISTANCE), [(10, 30)], d)  # keep-out holds

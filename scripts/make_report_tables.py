@@ -1,8 +1,9 @@
-"""LaTeX tables for the report, generated from the result CSVs (no hand-typed numbers).
+"""LaTeX tables for the report and the paper, generated from the result CSVs (no hand-typed numbers).
 
-Writes report/tables/*.tex.
+Writes report/tables/*.tex (Russian, decimal comma) and paper/tables/*.tex (English).
 """
 
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from s2m.io import read_csv
@@ -10,86 +11,99 @@ from s2m.io import read_csv
 OUT = Path("report/tables")
 ARM_RU = {
     "uncalibrated": "без калибровки",
-    "label_cell": "метки клеток",
+    "label_cell": "множества меток",
+    "geometry": "только геометрия",
     "label_only": "только метки",
     "pose_only": "только поза",
-    "separate": "раздельно",
-    "joint": "\\textbf{совместно}",
+    "separate": "сумма",
+    "joint": "\\textbf{совместный}",
     "oracle": "оракул",
 }
-SHORT_RU = {"label_only": "метки", "separate": "раздельно", "joint": "\\textbf{совместно}"}
+SHORT_RU = {"label_only": "метки", "separate": "сумма", "joint": "\\textbf{совм.}"}
 CLASS_RU = {"indoor_plant": "растение", "tv_stand": "тумба под ТВ", "bike": "велосипед"}
+RADIUS_ARMS = ("geometry", "label_only", "pose_only", "separate", "joint")
+DAGGER = "$^\\dagger$"
 
 
-def fmt(v, digits=2):
+def fmt(v, digits=2, comma=True):
+    """Half-up rounding (0.945 -> 0.95, as in the text), decimal comma unless comma=False."""
     try:
         x = float(v)
     except (TypeError, ValueError):
         return "---"
-    return "---" if x != x else f"{x:.{digits}f}".replace(".", "{,}")
+    if x != x:
+        return "---"
+    q = Decimal(repr(x)).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP)
+    return f"{q:.{digits}f}".replace(".", "{,}" if comma else ".")
+
+
+def radius_cell(r) -> str:
+    """Median radius; dagger if the arm abstains in at least half of the splits (median of the rest)."""
+    if r["arm"] not in RADIUS_ARMS:
+        return "0"
+    return fmt(r["radius_median"]) + (DAGGER if float(r["abstain_rate"]) >= 0.5 else "")
 
 
 def coverage_table():
     rows = read_csv("results/tables/coverage.csv")
     levels = ("L0", "L2", "L3", "L4")
-    arms = ("uncalibrated", "label_cell", "label_only", "pose_only", "separate", "joint")
+    arms = ("uncalibrated", "label_cell", "geometry", "label_only", "pose_only", "separate", "joint")
     lines = ["\\begin{tabular}{ll" + "cc" * len(levels) + "}", "\\toprule",
              "Класс & Калибровка & " + " & ".join(f"\\multicolumn{{2}}{{c}}{{{lv}}}" for lv in levels) + " \\\\",
              " & & " + " & ".join(["покр. & $\\hat r$, м"] * len(levels)) + " \\\\", "\\midrule"]
-    for cls in ("bike", "indoor_plant", "tv_stand"):
+    for cls in ("bike", "indoor_plant"):
         for i, arm in enumerate(arms):
             cells = []
             for lv in levels:
                 r = next(x for x in rows if x["level"] == lv and x["class"] == cls and x["arm"] == arm)
-                abst = float(r["abstain_rate"])
-                cov = fmt(r["coverage_mean"])
-                rad = fmt(r["radius_median"]) if arm in ("label_only", "pose_only", "separate", "joint") else "0"
-                if abst >= 0.5:
-                    rad = f"отк.\\,{fmt(abst, 2)}"
-                cells += [cov, rad]
+                cells += [fmt(r["coverage_mean"]), radius_cell(r)]
             name = CLASS_RU[cls] if i == 0 else ""
             lines.append(f"{name} & {ARM_RU[arm]} & " + " & ".join(cells) + " \\\\")
-        lines.append("\\midrule" if cls != "tv_stand" else "\\bottomrule")
+        lines.append("\\midrule" if cls != "indoor_plant" else "\\bottomrule")
     lines.append("\\end{tabular}")
     (OUT / "coverage.tex").write_text("\n".join(lines) + "\n")
 
 
-def missions_table(tag=""):
+
+def missions_table(tag="_pb", levels=("L0", "L2", "L3")):
     path = Path(f"results/tables/missions{tag}.csv")
     if not path.exists():
         return
     rows = read_csv(path)
-    levels = ("L0", "L2", "L4")
-    arms = ("uncalibrated", "label_cell", "label_only", "pose_only", "separate", "joint", "oracle")
+    arms = ("uncalibrated", "label_cell", "geometry", "label_only", "pose_only", "separate", "joint", "oracle")
     lines = ["\\begin{tabular}{l" + "ccc" * len(levels) + "}", "\\toprule",
              "Калибровка & " + " & ".join(f"\\multicolumn{{3}}{{c}}{{{lv}}}" for lv in levels) + " \\\\",
-             " & " + " & ".join(["путь & опасно & успех"] * len(levels)) + " \\\\", "\\midrule"]
+             " & " + " & ".join(["путь & опасн. & успех"] * len(levels)) + " \\\\", "\\midrule"]
     for arm in arms:
         cells = []
         for lv in levels:
             r = next(x for x in rows if x["level"] == lv and x["arm"] == arm)
-            cells += [fmt(r["planned"]), fmt(r["violation_given_planned"]), fmt(r["success"])]
+            cells += [fmt(r["planned"]), f"{int(float(r['n_violation']))}/{int(float(r['n_planned']))}", fmt(r["success"])]
         lines.append(f"{ARM_RU[arm]} & " + " & ".join(cells) + " \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
     (OUT / f"missions{tag}.tex").write_text("\n".join(lines) + "\n")
+
 
 
 def alpha_table():
     path = Path("results/tables/alpha_sweep.csv")
     if not path.exists():
         return
-    rows = read_csv(path)
-    get = lambda a, arm, key: next(r[key] for r in rows if r["alpha"] == a and r["arm"] == arm)
-    lines = ["\\begin{tabular}{c|cc|cc|c|ccc|c}", "\\toprule",
-             "$\\alpha$ & \\multicolumn{2}{c|}{покрытие} & \\multicolumn{2}{c|}{$\\hat r$, м} & отк. & "
-             "\\multicolumn{3}{c|}{путь найден} & опасно \\\\",
-             " & раст. & велос. & раст. & велос. & раст. & совм. & разд. & оракул & совм. \\\\", "\\midrule"]
+    rows = [r for r in read_csv(path)]
+    get = lambda kind, a, arm, key: next((r[key] for r in rows if r["tasks"] == kind and r["alpha"] == a
+                                          and r["arm"] == arm), "nan")
+    lines = ["\\begin{tabular}{c|cc|cc|c|cc|cc}", "\\toprule",
+             "$\\alpha$ & \\multicolumn{2}{c|}{покрытие} & \\multicolumn{2}{c|}{$\\hat r$, м} & отказ & "
+             "\\multicolumn{2}{c|}{трудные: путь} & \\multicolumn{2}{c}{случайные: успех} \\\\",
+             " & раст. & велос. & раст. & велос. & раст. & совм. & оракул & совм. & оракул \\\\", "\\midrule"]
     for a in sorted({r["alpha"] for r in rows}, key=float):
-        cells = [fmt(a, 2), fmt(get(a, "joint", "coverage_mean_indoor_plant")), fmt(get(a, "joint", "coverage_mean_bike")),
-                 fmt(get(a, "joint", "radius_median_indoor_plant")), fmt(get(a, "joint", "radius_median_bike")),
-                 fmt(get(a, "joint", "abstain_rate_indoor_plant")), fmt(get(a, "joint", "planned")),
-                 fmt(get(a, "separate", "planned")), fmt(get(a, "oracle", "planned")),
-                 fmt(get(a, "joint", "violation"), 3)]
+        cells = [fmt(a, 2), fmt(get("pass_by", a, "joint", "coverage_mean_indoor_plant")),
+                 fmt(get("pass_by", a, "joint", "coverage_mean_bike")),
+                 fmt(get("pass_by", a, "joint", "radius_median_indoor_plant")),
+                 fmt(get("pass_by", a, "joint", "radius_median_bike")),
+                 fmt(get("pass_by", a, "joint", "abstain_rate_indoor_plant")),
+                 fmt(get("pass_by", a, "joint", "planned")), fmt(get("pass_by", a, "oracle", "planned")),
+                 fmt(get("random", a, "joint", "success")), fmt(get("random", a, "oracle", "success"))]
         lines.append(" & ".join(cells) + " \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
     (OUT / "alpha.tex").write_text("\n".join(lines) + "\n")
@@ -103,18 +117,13 @@ def variants_table():
     if sam.exists():
         rows = read_csv(sam)
         for m, name in (("box", "рамка + глубина"), ("sam", "MobileSAM")):
-            for lv in ("L0", "L3", "L4"):
+            for lv in ("L0", "L4"):
                 specs.append((f"{name}, {lv}", [r for r in rows if r["masks"] == m and r["level"] == lv]))
     vo = Path("results/tables/variants_vo.csv")
     if vo.exists():
         rows = read_csv(vo)
         for lv in sorted({r["level"] for r in rows}):
             specs.append((f"одометрия, каждый {lv[2:]}-й кадр", [r for r in rows if r["level"] == lv]))
-    ood = Path("results/tables/variants_ood.csv")
-    if ood.exists():
-        rows = read_csv(ood)
-        for lv in ("L0", "L3"):
-            specs.append((f"HM3D, {lv}", [r for r in rows if r["level"] == lv]))
     if not specs:
         return
     lines = ["\\begin{tabular}{l|" + "cc" * len(arms) + "|" + "cc" * len(arms) + "}", "\\toprule",
@@ -126,40 +135,101 @@ def variants_table():
         for cls in ("bike", "indoor_plant"):
             for arm in arms:
                 r = next((x for x in rs if x["class"] == cls and x["arm"] == arm), None)
-                if r is None:
-                    cells += ["---", "---"]
-                    continue
-                abst = float(r["abstain_rate"])
-                rad = fmt(r["radius_median"])
-                cells += [fmt(r["coverage_mean"]), rad + ("$^\\dagger$" if abst >= 0.5 else "")]
+                cells += ["---", "---"] if r is None else [fmt(r["coverage_mean"]), radius_cell(r)]
         lines.append(f"{name} & " + " & ".join(cells) + " \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
     (OUT / "variants.tex").write_text("\n".join(lines) + "\n")
 
 
 def comparison_table():
+    """2 x 2 design: vocabulary x risk level, random tasks; mission success per arm."""
     path = Path("results/tables/comparison.csv")
     if not path.exists():
         return
     rows = read_csv(path)
-    setting_ru = {"closed": "закрытый словарь, 95\\,\\%", "open": "открытый словарь, 90\\,\\%"}
-    lines = ["\\begin{tabular}{ll|ccc|ccc|cc|c}", "\\toprule",
-             "Условия & Дрейф & \\multicolumn{3}{c|}{метки клеток} & \\multicolumn{3}{c|}{\\textbf{совместно}} & "
-             "\\multicolumn{2}{c|}{без калибровки} & оракул \\\\",
-             " & & покр. & успех & опасно & покр. & успех & опасно & успех & опасно & успех \\\\", "\\midrule"]
-    for setting in ("closed", "open"):
-        levels = [lv for lv in ("L0", "L2", "L3", "L4") if any(r["setting"] == setting and r["level"] == lv for r in rows)]
-        for i, lv in enumerate(levels):
-            g = lambda arm, key: next(r[key] for r in rows if r["setting"] == setting and r["level"] == lv and r["arm"] == arm)
-            cov = lambda arm: fmt(min(float(g(arm, "coverage_bike")), float(g(arm, "coverage_indoor_plant"))))
-            cells = [setting_ru[setting] if i == 0 else "", "известна" if lv == "L0" else lv,
-                     cov("label_cell"), fmt(g("label_cell", "success")), fmt(g("label_cell", "violation"), 3),
-                     cov("joint"), fmt(g("joint", "success")), fmt(g("joint", "violation"), 3),
-                     fmt(g("uncalibrated", "success")), fmt(g("uncalibrated", "violation"), 3), fmt(g("oracle", "success"))]
-            lines.append(" & ".join(cells) + " \\\\")
-        lines.append("\\midrule" if setting == "closed" else "\\bottomrule")
+    arms = ("label_cell", "geometry", "joint", "uncalibrated", "oracle")
+    lines = ["\\begin{tabular}{llc|ccccc}", "\\toprule",
+             "Словарь & $1 - \\alpha$ & Дрейф & " + " & ".join(ARM_RU[a] for a in arms) + " \\\\", "\\midrule"]
+    settings = [("closed", "0.05"), ("closed", "0.1"), ("open", "0.05"), ("open", "0.1")]
+    for s, (vocab, alpha) in enumerate(settings):
+        for i, lv in enumerate(("L0", "L2", "L3")):
+            g = lambda arm, key: next(r[key] for r in rows if r["vocabulary"] == vocab and r["alpha"] == alpha
+                                      and r["level"] == lv and r["arm"] == arm)
+            cells = []
+            for arm in arms:
+                c = fmt(g(arm, "success"))
+                if arm != "oracle" and float(g(arm, "violation")) > 0:
+                    c += "$^\\ast$"
+                cells.append(c)
+            head = ["закрытый" if vocab == "closed" else "открытый", fmt(1 - float(alpha))] if i == 0 else ["", ""]
+            lines.append(" & ".join(head + ["известна" if lv == "L0" else lv] + cells) + " \\\\")
+        lines.append("\\midrule" if s < len(settings) - 1 else "\\bottomrule")
     lines.append("\\end{tabular}")
     (OUT / "comparison.tex").write_text("\n".join(lines) + "\n")
+
+
+PAPER = Path("paper/tables")
+ARM_EN = {"uncalibrated": "uncalibrated", "label_cell": "label sets~\\cite{sundarsingh}", "geometry": "geometry only",
+          "label_only": "labels only", "pose_only": "pose only", "separate": "sum", "joint": "\\textbf{joint (ours)}",
+          "oracle": "oracle"}
+
+
+def paper_coverage_table():
+    rows = read_csv("results/tables/coverage.csv")
+    f = lambda v: fmt(v, comma=False)
+    lines = ["\\begin{tabular}{l|ccc|c|ccc|c}", "\\toprule",
+             " & \\multicolumn{4}{c|}{bike} & \\multicolumn{4}{c}{indoor plant} \\\\",
+             "calibration & L0 & L2 & L4 & $\\hat r$ L4 & L0 & L2 & L4 & $\\hat r$ L4 \\\\", "\\midrule"]
+    for arm in ("uncalibrated", "label_cell", "geometry", "label_only", "pose_only", "separate", "joint"):
+        cells = []
+        for cls in ("bike", "indoor_plant"):
+            g = lambda lv: next(x for x in rows if x["level"] == lv and x["class"] == cls and x["arm"] == arm)
+            cells += [f(g(lv)["coverage_mean"]) for lv in ("L0", "L2", "L4")]
+            r = g("L4")
+            cells.append("0" if arm not in RADIUS_ARMS else f(r["radius_median"]) + (DAGGER if float(r["abstain_rate"]) >= 0.5 else ""))
+        lines.append(f"{ARM_EN[arm]} & " + " & ".join(cells) + " \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    (PAPER / "coverage.tex").write_text("\n".join(lines) + "\n")
+
+
+def paper_missions_table():
+    """Hard and random tasks at L0 and L3: path found / unsafe among found / success."""
+    lines = ["\\begin{tabular}{l|cc|cc|cc}", "\\toprule",
+             " & \\multicolumn{2}{c|}{hard: path} & \\multicolumn{2}{c|}{hard: unsafe} & \\multicolumn{2}{c}{random: success} \\\\",
+             "calibration & L0 & L3 & L0 & L3 & L0 & L3 \\\\", "\\midrule"]
+    pb = read_csv("results/tables/missions_pb.csv")
+    rnd = read_csv("results/tables/missions_rand.csv")
+    f = lambda v: fmt(v, comma=False)
+    for arm in ("uncalibrated", "label_cell", "geometry", "joint", "oracle"):
+        g = lambda rows, lv: next(x for x in rows if x["level"] == lv and x["arm"] == arm)
+        cells = [f(g(pb, lv)["planned"]) for lv in ("L0", "L3")]
+        cells += [f(g(pb, lv)["violation_given_planned"]) for lv in ("L0", "L3")]
+        cells += [f(g(rnd, lv)["success"]) for lv in ("L0", "L3")]
+        lines.append(f"{ARM_EN[arm]} & " + " & ".join(cells) + " \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    (PAPER / "missions.tex").write_text("\n".join(lines) + "\n")
+
+
+def paper_comparison_table():
+    path = Path("results/tables/comparison.csv")
+    if not path.exists():
+        return
+    rows = read_csv(path)
+    f = lambda v: fmt(v, comma=False)
+    arms = ("label_cell", "geometry", "joint", "uncalibrated")
+    lines = ["\\begin{tabular}{llc|cccc}", "\\toprule",
+             "vocab. & $1-\\alpha$ & drift & label sets & geometry & \\textbf{joint} & uncal. \\\\", "\\midrule"]
+    settings = [("closed", "0.05"), ("closed", "0.1"), ("open", "0.05"), ("open", "0.1")]
+    for s, (vocab, alpha) in enumerate(settings):
+        for i, lv in enumerate(("L0", "L2", "L3")):
+            g = lambda arm, key: next(r[key] for r in rows if r["vocabulary"] == vocab and r["alpha"] == alpha
+                                      and r["level"] == lv and r["arm"] == arm)
+            cells = [f(g(a, "success")) + ("$^\\ast$" if float(g(a, "violation")) > 0 else "") for a in arms]
+            head = [vocab, f(1 - float(alpha))] if i == 0 else ["", ""]
+            lines.append(" & ".join(head + ["none" if lv == "L0" else lv] + cells) + " \\\\")
+        lines.append("\\midrule" if s < len(settings) - 1 else "\\bottomrule")
+    lines.append("\\end{tabular}")
+    (PAPER / "comparison.tex").write_text("\n".join(lines) + "\n")
 
 
 if __name__ == "__main__":
@@ -169,4 +239,8 @@ if __name__ == "__main__":
     comparison_table()
     variants_table()
     missions_table("_pb")
-    print("tables:", sorted(p.name for p in OUT.glob("*.tex")))
+    PAPER.mkdir(parents=True, exist_ok=True)
+    paper_coverage_table()
+    paper_missions_table()
+    paper_comparison_table()
+    print("tables:", sorted(p.name for p in OUT.glob("*.tex")), sorted(p.name for p in PAPER.glob("*.tex")))

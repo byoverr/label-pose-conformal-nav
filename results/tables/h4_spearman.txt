@@ -1,1 +1,1 @@
-n_scenes=18 rho_miou=-0.054 p=0.831 rho_avoid_iou=0.390 p=0.109
+n_scenes=18 rho_miou=-0.037 p=0.883 ci95=[-0.493,0.435] rho_avoid_iou=0.327 p=0.186

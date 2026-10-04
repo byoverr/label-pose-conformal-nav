@@ -32,6 +32,7 @@ scores: data
 
 coverage:
 	$(PY) scripts/analyze_coverage.py
+	$(PY) scripts/coverage_checks.py
 
 missions:
 	$(PY) scripts/scene_metrics.py
@@ -51,8 +52,13 @@ comparison:
 	$(PY) scripts/run_detector.py data/replica_cad/* --closed $(CLOSED5) --detections data/cache/detections_closed5
 	$(PY) scripts/compute_scores.py data/replica_cad/* --detections data/cache/detections_closed5 --out results/scores_closed5
 	$(PY) scripts/analyze_coverage.py --scores results/scores_closed5 --alpha 0.05 --tag _closed5_a005
+	$(PY) scripts/analyze_coverage.py --scores results/scores_closed5 --tag _closed5
+	$(PY) scripts/analyze_coverage.py --alpha 0.05 --tag _a005
 	$(PY) scripts/run_missions.py --kind random --alpha 0.05 --scores results/scores_closed5 \
 		--detections data/cache/detections_closed5 --only L0 L2 L3 $(PB) --out results/missions_rand_closed5_a005
+	$(PY) scripts/run_missions.py --kind random --scores results/scores_closed5 \
+		--detections data/cache/detections_closed5 --only L0 L2 L3 $(PB) --out results/missions_rand_closed5
+	$(PY) scripts/run_missions.py --kind random --alpha 0.05 --only L0 L2 L3 $(PB) --out results/missions_rand_a005
 	$(PY) scripts/compare_known_pose.py
 
 # --- robustness checks ------------------------------------------------------------------------
@@ -61,10 +67,11 @@ alpha:
 		$(PY) scripts/analyze_coverage.py --alpha 0.$$a --tag _a0$$a && \
 		$(PY) scripts/run_missions.py --alpha 0.$$a $(PB) --out results/missions_pb_a0$$a ; \
 	done
+	$(PY) scripts/run_missions.py --kind random --alpha 0.3 $(PB) --out results/missions_rand_a03
 	$(PY) scripts/analyze_alpha.py --level L3
 
 composition:
-	$(PY) scripts/composition_stress.py --alpha 0.3 --fail-level L5
+	$(PY) scripts/composition_stress.py --alpha 0.3 --fail-level L5 --splits 1000 --random-draws 20
 
 sam:
 	$(PY) scripts/run_segmenter.py data/replica_cad/*
@@ -93,6 +100,8 @@ robustness: alpha composition sam vo hm3d grid
 # --- documents ---------------------------------------------------------------------------------
 tables:
 	$(PY) scripts/make_report_tables.py
+	$(PY) scripts/plot_report_figures_ru.py
+	$(PY) scripts/plot_example.py v3_sc0_staging_20 --seed 1 --task 1 --paper --lang ru
 
 docs: tables
 	cd report && tectonic report.tex

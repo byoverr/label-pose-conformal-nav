@@ -20,7 +20,8 @@ from s2m.analysis import load_scores
 from s2m.io import DEV_SCENES, LEVELS, level_labels, mission_rows, rate, read_csv, write_csv
 from s2m.viz import arm_line, setup
 
-ARMS = ("joint", "separate", "label_only", "pose_only", "uncalibrated", "label_cell", "oracle")
+ARMS = ("joint", "separate", "label_only", "pose_only", "uncalibrated", "label_cell", "geometry", "oracle")
+H4_BOOT = 2000  # scene bootstrap resamples for the H4 rank correlation
 
 
 if __name__ == "__main__":
@@ -42,6 +43,9 @@ if __name__ == "__main__":
         for arm in ARMS:
             rs = [r for r in rows if r["level"] == lv and r["arm"] == arm]
             planned = [r for r in rs if r["planned"] == "True"]
+            # one entry per drift realization: did the arm's traversable set reach a dangerous cell?
+            real = {(r["scene"], r["seed"]): r for r in rs}.values()
+            certified = [r for r in real if r["abstained"] != "True"]
             ratio = [float(r["length"]) / float(r["oracle_length"]) for r in planned
                      if r["oracle_length"] not in ("", "nan") and np.isfinite(float(r["oracle_length"]))]
             table.append({
@@ -49,14 +53,17 @@ if __name__ == "__main__":
                 "planned": rate(rs, "planned"), "violation": rate(rs, "violation"),
                 "collision": rate(rs, "collision"), "success": rate(rs, "success"),
                 "abstained": rate(rs, "abstained"),
+                "n_planned": len(planned), "n_violation": sum(r["violation"] == "True" for r in planned),
                 "violation_given_planned": rate(planned, "violation"),
+                "n_realizations": len(real), "exposed": rate(certified, "exposed") if rs and "exposed" in rs[0] else np.nan,
+                "fell_back": float(np.mean([int(r["classes_fell_back"]) > 0 for r in real])) if real else np.nan,
                 "length_ratio_median": float(np.median(ratio)) if ratio else np.nan,
             })
     write_csv(f"results/tables/missions{args.tag}.csv", table)
     for t in table:
-        print(f"{t['level']} {t['arm']:12s} plan {t['planned']:.2f} viol {t['violation']:.3f} "
-              f"(|plan {t['violation_given_planned']:.3f}) coll {t['collision']:.3f} succ {t['success']:.2f} "
-              f"abst {t['abstained']:.2f} len {t['length_ratio_median']:.2f}")
+        print(f"{t['level']} {t['arm']:12s} plan {t['planned']:.2f} viol {t['n_violation']}/{t['n_planned']} "
+              f"coll {t['collision']:.3f} succ {t['success']:.2f} abst {t['abstained']:.2f} "
+              f"fallback {t['fell_back']:.2f} exposed {t['exposed']:.2f} len {t['length_ratio_median']:.2f}")
 
     setup()
     x = np.arange(len(LEVELS))
@@ -91,8 +98,12 @@ if __name__ == "__main__":
     pts = np.array(pts)
     rho_m, p_m = spearmanr(pts[:, 0], pts[:, 2])
     rho_a, p_a = spearmanr(pts[:, 1], pts[:, 2])
-    print(f"H4: Spearman(mIoU, violations) = {rho_m:.2f} (p={p_m:.2f}); "
-          f"Spearman(avoid-class IoU, violations) = {rho_a:.2f} (p={p_a:.2f}); n = {len(pts)} scenes")
+    rng = np.random.default_rng(0)
+    boot = [spearmanr(*pts[idx][:, [0, 2]].T)[0] for idx in rng.integers(len(pts), size=(H4_BOOT, len(pts)))]
+    ci_m = np.nanpercentile(boot, [2.5, 97.5])
+    print(f"H4: Spearman(mIoU, violations) = {rho_m:.2f} (p={p_m:.2f}, 95% scene-bootstrap CI "
+          f"[{ci_m[0]:.2f}, {ci_m[1]:.2f}]); Spearman(avoid-class IoU, violations) = {rho_a:.2f} (p={p_a:.2f}); "
+          f"n = {len(pts)} scenes")
     fig, axes = plt.subplots(1, 2, figsize=(8, 3.2), sharey=True)
     for ax, col, name, rho in ((axes[0], 0, "mIoU (all classes)", rho_m), (axes[1], 1, "IoU of avoid classes", rho_a)):
         ax.scatter(pts[:, col], pts[:, 2], color="#2a78d6", s=28)
@@ -103,4 +114,5 @@ if __name__ == "__main__":
     fig.tight_layout()
     fig.savefig(f"results/figures/miou_vs_violations{args.tag}.png")
     with open(f"results/tables/h4_spearman{args.tag}.txt", "w") as f:
-        f.write(f"n_scenes={len(pts)} rho_miou={rho_m:.3f} p={p_m:.3f} rho_avoid_iou={rho_a:.3f} p={p_a:.3f}\n")
+        f.write(f"n_scenes={len(pts)} rho_miou={rho_m:.3f} p={p_m:.3f} ci95=[{ci_m[0]:.3f},{ci_m[1]:.3f}] "
+                f"rho_avoid_iou={rho_a:.3f} p={p_a:.3f}\n")

@@ -36,6 +36,7 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--task", type=int, default=0)
     ap.add_argument("--paper", action="store_true", help="compact version for a one-column figure (no suptitle)")
+    ap.add_argument("--lang", default="en", choices=["en", "ru"], help="ru: compact figure for the Russian report")
     args = ap.parse_args()
 
     scene = load_scene(Path("data/replica_cad") / args.scene)
@@ -71,7 +72,11 @@ if __name__ == "__main__":
     rows, cols = np.nonzero(img > 0)
     r0, r1, c0, c1 = rows.min() - 5, rows.max() + 5, cols.min() - 5, cols.max() + 5
 
-    fig, axes = plt.subplots(1, 2, figsize=(6.4, 4.6) if args.paper else (10, 5.2), sharey=True)
+    ru = args.lang == "ru"
+    compact = args.paper or ru
+    title = {"uncalibrated": "карта без калибровки", "joint": "совместный запас"} if ru else \
+        {arm: ARM_STYLE[arm][0] for arm in ("uncalibrated", "joint")}
+    fig, axes = plt.subplots(1, 2, figsize=(6.4, 4.6) if compact else (10, 5.2), sharey=True)
     d_true = distance_to(avoid_true, res)
     for ax, arm in zip(axes, ("uncalibrated", "joint")):
         ax.imshow(img, cmap=cmap, origin="lower", interpolation="nearest", vmin=0, vmax=3)
@@ -81,11 +86,16 @@ if __name__ == "__main__":
             ax.plot(path[:, 1], path[:, 0], color=ARM_STYLE[arm][1], lw=2.2)
             close = d_true[path[:, 0], path[:, 1]] < SAFETY_DISTANCE
             ax.scatter(path[close, 1], path[close, 0], color="#0b0b0b", s=10, zorder=5,
-                       label="closer than 0.5 m to a true plant/bike")
-            verdict = "VIOLATION" if close.any() else "safe"
-            ax.set_title(f"{ARM_STYLE[arm][0]}\npath {path_length(path, res):.1f} m, {verdict}")
+                       label="ближе 0,5 м к настоящему объекту" if ru else "closer than 0.5 m to a true plant/bike")
+            length = f"{path_length(path, res):.1f}"
+            if ru:
+                verdict = "опасно" if close.any() else "безопасно"
+                ax.set_title(f"{title[arm]}\nпуть {length.replace('.', ',')} м, {verdict}")
+            else:
+                verdict = "VIOLATION" if close.any() else "safe"
+                ax.set_title(f"{title[arm]}\npath {length} m, {verdict}")
         else:
-            ax.set_title(f"{ARM_STYLE[arm][0]}\nno path")
+            ax.set_title(f"{title[arm]}\n{'пути нет' if ru else 'no path'}")
         ax.plot(start[1], start[0], "o", color="#0b0b0b", ms=7)
         ax.plot(goal[1], goal[0], "*", color="#0b0b0b", ms=12)
         ax.set_xlim(c0, c1)
@@ -93,11 +103,12 @@ if __name__ == "__main__":
         ax.set_xticks([])
         ax.set_yticks([])
         ax.legend(loc="lower left", fontsize=7)
-    if not args.paper:
+    if not compact:
         ate = level_labels([r for r in load_scores("results/scores", exclude=DEV_SCENES) if r["scene"] == args.scene])
         fig.suptitle(f"{args.scene}, drift {args.level} (ATE {ate[args.level]}): red = true plant/bike footprint, "
                      f"grey = true obstacles, line = keep-out zone of the arm (planner frame)", fontsize=9)
     fig.tight_layout()
-    out = Path(f"results/figures/example_{args.scene}{'_paper' if args.paper else ''}.png")
+    suffix = "_ru" if ru else "_paper" if args.paper else ""
+    out = Path(f"results/figures/{'ru/' if ru else ''}example_{args.scene}{suffix}.png")
     fig.savefig(out)
     print(out)

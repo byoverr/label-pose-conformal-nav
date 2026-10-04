@@ -10,3 +10,4 @@ weights/
 results/*.log
 results/scores_smoke/
 results/archive/
+results/logs/
