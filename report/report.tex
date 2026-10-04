@@ -7,23 +7,26 @@
 \newfontfamily\cyrillicfonttt{PT Mono}[Scale=0.9]
 \graphicspath{{../results/}}
 
-\title{\vspace{-1.2cm}\large\bfseries Калиброванная навигация по ненадёжной открытословарной семантической карте:\\ совместный учёт ошибок метки и позы\\[4pt]
+\newtheorem{proposition}{Утверждение}
+\theoremstyle{definition}
+\newtheorem{definition}{Определение}
+\newtheorem{assumption}{Допущение}
+
+\title{\vspace{-1.2cm}\large\bfseries Конформная калибровка открытословарных семантических карт\\ при ошибках метки и позы\\[4pt]
 \normalsize\mdseries\itshape Conformal Calibration of Open-Vocabulary Semantic Maps under Label and Pose Uncertainty}
-\author{\normalsize Щетинкин Сергей Олегович\\ \small магистратура ИТМО «Робототехника и искусственный интеллект», 1 курс}
-\date{\normalsize Тестовое задание лаборатории BE2R, направление «Семантическое картирование, визуальная привязка и навигация»\\ \small октябрь 2026 · код и данные: \url{https://github.com/byoverr/label-pose-conformal-nav}}
+\author{\normalsize Щетинкин Сергей Олегович\\ \small Университет ИТМО}
+\date{\small октябрь 2026 · код и данные: \url{https://github.com/byoverr/label-pose-conformal-nav}}
 
 \begin{document}
 \maketitle
 \vspace{-0.4cm}
 \input{sections/00_abstract}
 \input{sections/01_intro}
-\input{sections/02_literature}
+\input{sections/02_related}
 \input{sections/03_problem}
-\input{sections/04_setup}
-\input{sections/05_results}
-\input{sections/05b_robustness}
-\input{sections/05c_quality_planner}
-\input{sections/06_discussion}
-\input{sections/08_bridge}
+\input{sections/04_method}
+\input{sections/05_setup}
+\input{sections/06_results}
+\input{sections/07_discussion}
 \input{sections/99_bibliography}
 \end{document}
