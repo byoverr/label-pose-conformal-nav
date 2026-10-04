@@ -10,10 +10,10 @@ from s2m.io import read_csv
 OUT = Path("report/tables")
 ARM_RU = {
     "uncalibrated": "без калибровки",
-    "label_cell": "покадровая CP меток",
+    "label_cell": "метки клеток",
     "label_only": "только метки",
     "pose_only": "только поза",
-    "separate": "раздельно (сумма)",
+    "separate": "раздельно",
     "joint": "\\textbf{совместно}",
     "oracle": "оракул",
 }
@@ -34,8 +34,8 @@ def coverage_table():
     levels = ("L0", "L2", "L3", "L4")
     arms = ("uncalibrated", "label_cell", "label_only", "pose_only", "separate", "joint")
     lines = ["\\begin{tabular}{ll" + "cc" * len(levels) + "}", "\\toprule",
-             "Класс & Ветка & " + " & ".join(f"\\multicolumn{{2}}{{c}}{{{lv}}}" for lv in levels) + " \\\\",
-             " & & " + " & ".join(["покр. & $\\hat q$, м"] * len(levels)) + " \\\\", "\\midrule"]
+             "Класс & Калибровка & " + " & ".join(f"\\multicolumn{{2}}{{c}}{{{lv}}}" for lv in levels) + " \\\\",
+             " & & " + " & ".join(["покр. & $\\hat r$, м"] * len(levels)) + " \\\\", "\\midrule"]
     for cls in ("bike", "indoor_plant", "tv_stand"):
         for i, arm in enumerate(arms):
             cells = []
@@ -62,8 +62,8 @@ def missions_table(tag=""):
     levels = ("L0", "L2", "L4")
     arms = ("uncalibrated", "label_cell", "label_only", "pose_only", "separate", "joint", "oracle")
     lines = ["\\begin{tabular}{l" + "ccc" * len(levels) + "}", "\\toprule",
-             "Ветка & " + " & ".join(f"\\multicolumn{{3}}{{c}}{{{lv}}}" for lv in levels) + " \\\\",
-             " & " + " & ".join(["путь & наруш. & успех"] * len(levels)) + " \\\\", "\\midrule"]
+             "Калибровка & " + " & ".join(f"\\multicolumn{{3}}{{c}}{{{lv}}}" for lv in levels) + " \\\\",
+             " & " + " & ".join(["путь & опасно & успех"] * len(levels)) + " \\\\", "\\midrule"]
     for arm in arms:
         cells = []
         for lv in levels:
@@ -74,26 +74,6 @@ def missions_table(tag=""):
     (OUT / f"missions{tag}.tex").write_text("\n".join(lines) + "\n")
 
 
-def bridge_table(tag=""):
-    path = Path(f"results/tables/planner_bridge{tag}_summary.csv")
-    if not path.exists():
-        return
-    rows = read_csv(path)
-    pls = ("rrt_connect", "angle_zone", "angle_zone_adaptive")
-    lines = ["\\begin{tabular}{ccc|ccc|ccc|ccc}", "\\toprule",
-             "$m$ & своб. & решаемо & \\multicolumn{3}{c|}{решено за бюджет} & "
-             "\\multicolumn{3}{c|}{итераций (медиана)} & \\multicolumn{3}{c}{длина / кратчайший} \\\\",
-             " & & & Р & У & А & Р & У & А & Р & У & А \\\\", "\\midrule"]
-    for r in rows:
-        cells = [fmt(r["scale"], 1), fmt(r["free_frac"]), fmt(r["solvable_frac"])]
-        cells += [fmt(r[f"{pl}_solved"]) for pl in pls]
-        cells += [fmt(r[f"{pl}_iters_median"], 0) for pl in pls]
-        cells += [fmt(r[f"{pl}_length_ratio_median"]) for pl in pls]
-        lines.append(" & ".join(cells) + " \\\\")
-    lines += ["\\bottomrule", "\\end{tabular}"]
-    (OUT / f"bridge{tag}.tex").write_text("\n".join(lines) + "\n")
-
-
 def alpha_table():
     path = Path("results/tables/alpha_sweep.csv")
     if not path.exists():
@@ -101,8 +81,8 @@ def alpha_table():
     rows = read_csv(path)
     get = lambda a, arm, key: next(r[key] for r in rows if r["alpha"] == a and r["arm"] == arm)
     lines = ["\\begin{tabular}{c|cc|cc|c|ccc|c}", "\\toprule",
-             "$\\alpha$ & \\multicolumn{2}{c|}{покрытие} & \\multicolumn{2}{c|}{$\\hat q$, м} & отк. & "
-             "\\multicolumn{3}{c|}{путь найден} & наруш. \\\\",
+             "$\\alpha$ & \\multicolumn{2}{c|}{покрытие} & \\multicolumn{2}{c|}{$\\hat r$, м} & отк. & "
+             "\\multicolumn{3}{c|}{путь найден} & опасно \\\\",
              " & раст. & велос. & раст. & велос. & раст. & совм. & разд. & оракул & совм. \\\\", "\\midrule"]
     for a in sorted({r["alpha"] for r in rows}, key=float):
         cells = [fmt(a, 2), fmt(get(a, "joint", "coverage_mean_indoor_plant")), fmt(get(a, "joint", "coverage_mean_bike")),
@@ -129,18 +109,18 @@ def variants_table():
     if vo.exists():
         rows = read_csv(vo)
         for lv in sorted({r["level"] for r in rows}):
-            specs.append((f"ВО, каждый {lv[2:]}-й кадр", [r for r in rows if r["level"] == lv]))
+            specs.append((f"одометрия, каждый {lv[2:]}-й кадр", [r for r in rows if r["level"] == lv]))
     ood = Path("results/tables/variants_ood.csv")
     if ood.exists():
         rows = read_csv(ood)
         for lv in ("L0", "L3"):
-            specs.append((f"HM3D (OOD), {lv}", [r for r in rows if r["level"] == lv]))
+            specs.append((f"HM3D, {lv}", [r for r in rows if r["level"] == lv]))
     if not specs:
         return
     lines = ["\\begin{tabular}{l|" + "cc" * len(arms) + "|" + "cc" * len(arms) + "}", "\\toprule",
              "Вариант & \\multicolumn{6}{c|}{велосипед} & \\multicolumn{6}{c}{растение} \\\\",
              " & " + " & ".join(f"\\multicolumn{{2}}{{c}}{{{SHORT_RU[a]}}}" for a in arms * 2) + " \\\\",
-             " & " + " & ".join(["покр. & $\\hat q$"] * len(arms) * 2) + " \\\\", "\\midrule"]
+             " & " + " & ".join(["покр. & $\\hat r$"] * len(arms) * 2) + " \\\\", "\\midrule"]
     for name, rs in specs:
         cells = []
         for cls in ("bike", "indoor_plant"):
@@ -162,9 +142,9 @@ def comparison_table():
     if not path.exists():
         return
     rows = read_csv(path)
-    setting_ru = {"closed": "их: 5 классов, 95\\,\\%", "open": "наши: 98 подсказок, 90\\,\\%"}
+    setting_ru = {"closed": "закрытый словарь, 95\\,\\%", "open": "открытый словарь, 90\\,\\%"}
     lines = ["\\begin{tabular}{ll|ccc|ccc|cc|c}", "\\toprule",
-             "Условия & Дрейф & \\multicolumn{3}{c|}{покадровая CP меток} & \\multicolumn{3}{c|}{\\textbf{совместно}} & "
+             "Условия & Дрейф & \\multicolumn{3}{c|}{метки клеток} & \\multicolumn{3}{c|}{\\textbf{совместно}} & "
              "\\multicolumn{2}{c|}{без калибровки} & оракул \\\\",
              " & & покр. & успех & опасно & покр. & успех & опасно & успех & опасно & успех \\\\", "\\midrule"]
     for setting in ("closed", "open"):
@@ -189,5 +169,4 @@ if __name__ == "__main__":
     comparison_table()
     variants_table()
     missions_table("_pb")
-    bridge_table("_pb")
     print("tables:", sorted(p.name for p in OUT.glob("*.tex")))

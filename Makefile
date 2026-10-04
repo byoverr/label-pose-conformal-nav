@@ -5,7 +5,6 @@
 #   make main          data, detector, calibration scores, coverage, missions   (~3 h on a laptop)
 #   make comparison    closed-vocabulary comparison with per-cell label calibration
 #   make robustness    risk-level sweep, composition stress test, SAM, visual odometry, HM3D, grid
-#   make bridge        sampling-based planners on calibrated maps
 #   make docs          report tables, report.pdf and paper.pdf (needs tectonic)
 #   make test          unit tests
 
@@ -16,7 +15,7 @@ PB := --avoid indoor_plant bike
 CLOSED5 := indoor_plant bike tv_stand sofa table
 
 .PHONY: setup data scores coverage missions main comparison alpha composition sam vo hm3d grid \
-        robustness bridge tables docs test all
+        robustness tables docs test all
 
 setup:
 	python3.12 -m venv .venv
@@ -91,12 +90,6 @@ grid:
 robustness: alpha composition sam vo hm3d grid
 	$(PY) scripts/analyze_variants.py
 
-# --- planner bridge ---------------------------------------------------------------------------
-bridge:
-	$(PY) scripts/run_planner_bridge.py $(PB) --params results/missions_pb --tag _pb --part 0/2
-	$(PY) scripts/run_planner_bridge.py $(PB) --params results/missions_pb --tag _pb --part 1/2
-	$(PY) scripts/analyze_bridge.py --tag _pb
-
 # --- documents ---------------------------------------------------------------------------------
 tables:
 	$(PY) scripts/make_report_tables.py
@@ -108,4 +101,4 @@ docs: tables
 test:
 	$(PY) -m pytest -q
 
-all: main comparison robustness bridge docs
+all: main comparison robustness docs
