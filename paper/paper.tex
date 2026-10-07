@@ -294,7 +294,7 @@ missed entirely in one of the 21 scenes; with 13 calibration scenes the margin i
 abstains whenever that scene is in the calibration set (63\,\% of the splits, about 13/21); under drift that scene's
 miss is sometimes below the cap and abstention is 24--59\,\%. When a certificate is issued, the worst scenes tend to be
 in the test set and the coverage among certified splits is 0.81--0.92, below the target, which a marginal guarantee
-allows. The TV stand, confidently mislabeled in three scenes, abstains in 75--95\,\% of the splits. Both mission classes are covered at once in
+allows. The TV stand, confidently labeled as a bench, rug or bed in three scenes, abstains in 75--95\,\% of the splits. Both mission classes are covered at once in
 85--87\,\% of test realizations, consistent with the union bound $1 - 2\alpha$.
 
 \subsection{Missions}
@@ -379,6 +379,20 @@ at L0 from 0.43 to 0.05~m, but the worst scene keeps 0.75~m, so the bike margin 
 from 1.23 to 1.06~m. The plant margin drops from 0.85 to 0.61~m at L0 but grows from 1.54 to 1.86~m at 45~cm. The region
 threshold $\lambda_0 = 0.05$ was set on the development scene; $\lambda_0 = 0.02$ gives slightly smaller margins (bike
 at 45~cm: 1.08 vs.\ 1.23~m), while 0.1 and 0.2 make the plant abstain in 65--100\,\% of the splits.
+
+\textbf{What lowers the price.} The plant's worst miss comes from two small pots in one scene: the detector takes one
+for a wall cabinet and does not see the other. The largest model of the same family, YOLO-World v2-x with the same 98
+text embeddings, finds the plant nearby: its worst miss drops from 3 to 0.71~m, plant abstention from 24--63\,\% to
+0--10\,\% of the splits, the L0 margin from 0.85 to 0.71~m, and certified coverage returns to 0.93; at L0 a path exists
+in 41\,\% of the hard tasks instead of 32\,\%. But the larger model also marks plants and bikes where there are none
+(their regions grow by 32 and 10\,\%), so at 7~cm of drift a path exists in 23\,\% instead of 30\,\%, and it never
+certifies the TV stand. The TV stand is swapped because of competitors in the vocabulary: with the closed five-class
+vocabulary it is certified in every split, but the detector then calls benches and beds TV stands, its region swells,
+and three-class missions find a path in only 5--8\,\% of the hard tasks (6--23\,\% with the open vocabulary): the error
+turns from misses into false positives. A conditional margin would need a feature that predicts the miss; the one a
+robot always has, path length, does not (Spearman $-0.09$ to $0.15$ at L2--L4), and a whole-object miss leaves no trace
+on the map for any feature to see. Weighted conformal prediction~\cite{barber2023} bounds coverage loss on dissimilar
+scenes but needs an estimate of how dissimilar they are, which two HM3D scenes cannot provide.
 
 \subsection{When does the sum of margins under-cover?}\label{sec:composition}
 

@@ -168,6 +168,29 @@ def comparison_table():
     (OUT / "comparison.tex").write_text("\n".join(lines) + "\n")
 
 
+def detector_table():
+    """YOLO-World v2-s (main) vs v2-x: joint margin and abstention per class, missions with plant and bike."""
+    if not Path("results/tables/coverage_x.csv").exists():
+        return
+    cov = {tag: read_csv(f"results/tables/coverage{tag}.csv") for tag in ("", "_x")}
+    mis = {tag: {kind: read_csv(f"results/tables/missions_{kind}{tag}.csv") for kind in ("pb", "rand")} for tag in ("", "_x")}
+    g = lambda rows, **kw: next(r for r in rows if all(r[k] == v for k, v in kw.items()))
+    lines = ["\\begin{tabular}{l|cc|cc|cc|cc}", "\\toprule",
+             "Детектор & \\multicolumn{2}{c|}{растение: $\\hat r$ / отказ} & \\multicolumn{2}{c|}{велосипед: $\\hat r$} & "
+             "\\multicolumn{2}{c|}{трудные: путь} & \\multicolumn{2}{c}{случайные: успех} \\\\",
+             " & L0 & L4 & L0 & L4 & L0 & L3 & L0 & L3 \\\\", "\\midrule"]
+    for tag, name in (("", "YOLO-World v2-s"), ("_x", "YOLO-World v2-x")):
+        c = cov[tag]
+        cells = [f"{fmt(g(c, level=lv, **{'class': 'indoor_plant'}, arm='joint')['radius_median'])} / "
+                 f"{fmt(g(c, level=lv, **{'class': 'indoor_plant'}, arm='joint')['abstain_rate'])}" for lv in ("L0", "L4")]
+        cells += [fmt(g(c, level=lv, **{"class": "bike"}, arm="joint")["radius_median"]) for lv in ("L0", "L4")]
+        cells += [fmt(g(mis[tag]["pb"], level=lv, arm="joint")["planned"]) for lv in ("L0", "L3")]
+        cells += [fmt(g(mis[tag]["rand"], level=lv, arm="joint")["success"]) for lv in ("L0", "L3")]
+        lines.append(f"{name} & " + " & ".join(cells) + " \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    (OUT / "detector.tex").write_text("\n".join(lines) + "\n")
+
+
 PAPER = Path("paper/tables")
 ARM_EN = {"uncalibrated": "uncalibrated", "label_cell": "label sets~\\cite{sundarsingh}", "geometry": "geometry only",
           "label_only": "labels only", "pose_only": "pose only", "separate": "sum", "joint": "\\textbf{joint (ours)}",
@@ -238,6 +261,7 @@ if __name__ == "__main__":
     alpha_table()
     comparison_table()
     variants_table()
+    detector_table()
     missions_table("_pb")
     PAPER.mkdir(parents=True, exist_ok=True)
     paper_coverage_table()

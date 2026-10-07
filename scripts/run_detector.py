@@ -3,6 +3,8 @@
 Example: python scripts/run_detector.py data/replica_cad/apt_0 --limit 50   # speed check
          python scripts/run_detector.py data/replica_cad/* --closed indoor_plant bike tv_stand sofa table \
                 --detections data/cache/detections_closed5     # closed 5-class vocabulary (Sundarsingh et al. setting)
+         python scripts/run_detector.py data/replica_cad/* --weights models/yolov8x-worldv2.pt \
+                --detections data/cache/detections_x           # the largest YOLO-World v2 model
 """
 
 import argparse
@@ -19,6 +21,7 @@ if __name__ == "__main__":
     ap.add_argument("--limit", type=int, default=None, help="only the first N frames (speed check)")
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--closed", nargs="+", default=None, help="closed vocabulary: keep only these class names")
+    ap.add_argument("--weights", default="models/yolov8s-worldv2.pt", help="YOLO-World weights (v2-s by default)")
     args = ap.parse_args()
 
     detector = None
@@ -31,7 +34,7 @@ if __name__ == "__main__":
         if detector is None:  # same 102-class vocabulary in every ReplicaCAD scene
             name2id = {v: k for k, v in scene.classes.items()}
             subset = None if args.closed is None else [name2id[n] for n in args.closed]
-            detector = OpenVocabDetector(object_vocabulary(scene.classes), subset=subset)
+            detector = OpenVocabDetector(object_vocabulary(scene.classes), weights=args.weights, subset=subset)
             print(f"detector on {detector.device}, {len(detector.ids)} prompts")
         ids = scene.frame_ids()[: args.limit]
         t = time.time()

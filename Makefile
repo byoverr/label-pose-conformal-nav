@@ -15,7 +15,7 @@ PB := --avoid indoor_plant bike
 CLOSED5 := indoor_plant bike tv_stand sofa table
 
 .PHONY: setup data scores coverage missions main comparison alpha composition sam vo hm3d grid \
-        robustness tables docs test all
+        detector robustness tables docs test all
 
 setup:
 	python3.12 -m venv .venv
@@ -59,6 +59,9 @@ comparison:
 	$(PY) scripts/run_missions.py --kind random --scores results/scores_closed5 \
 		--detections data/cache/detections_closed5 --only L0 L2 L3 $(PB) --out results/missions_rand_closed5
 	$(PY) scripts/run_missions.py --kind random --alpha 0.05 --only L0 L2 L3 $(PB) --out results/missions_rand_a005
+	$(PY) scripts/run_missions.py --scores results/scores_closed5 --detections data/cache/detections_closed5 \
+		--only L0 L2 L3 --out results/missions_closed5     # all three avoid classes, closed vocabulary
+	$(PY) scripts/analyze_missions.py --dir results/missions_closed5 --tag _closed5 --levels L0 L2 L3 --no-h4
 	$(PY) scripts/compare_known_pose.py
 
 # --- robustness checks ------------------------------------------------------------------------
@@ -94,7 +97,17 @@ hm3d:
 grid:
 	$(PY) scripts/grid_resolution.py --res 0.05 0.25 0.5 1.0
 
-robustness: alpha composition sam vo hm3d grid
+detector:  # the largest YOLO-World v2 model instead of v2-s
+	$(PY) scripts/run_detector.py data/replica_cad/* --weights models/yolov8x-worldv2.pt --detections data/cache/detections_x
+	$(PY) scripts/compute_scores.py data/replica_cad/* --detections data/cache/detections_x --out results/scores_x
+	$(PY) scripts/analyze_coverage.py --scores results/scores_x --tag _x
+	$(PY) scripts/run_missions.py --scores results/scores_x --detections data/cache/detections_x $(PB) --out results/missions_pb_x
+	$(PY) scripts/analyze_missions.py --dir results/missions_pb_x --tag _pb_x --no-h4
+	$(PY) scripts/run_missions.py --kind random --scores results/scores_x --detections data/cache/detections_x $(PB) \
+		--out results/missions_rand_x
+	$(PY) scripts/analyze_missions.py --dir results/missions_rand_x --tag _rand_x --no-h4
+
+robustness: alpha composition sam vo hm3d grid detector
 	$(PY) scripts/analyze_variants.py
 
 # --- documents ---------------------------------------------------------------------------------

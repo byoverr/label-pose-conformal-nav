@@ -57,7 +57,14 @@ class OpenVocabDetector:
             self.model = YOLOWorld(str(baked))
         else:
             self.model = YOLOWorld(weights)
-            self.model.set_classes(list(vocabulary.values()))
+            prompts = list(vocabulary.values())
+            donor = self._baked_donor(Path(weights), prompts)
+            if donor is not None:  # every YOLO-World v2 size uses the same CLIP text space: reuse its embeddings
+                self.model.model.txt_feats = donor.txt_feats.clone()
+                self.model.model.model[-1].nc = donor.model[-1].nc
+                self.model.model.names = donor.names
+            else:
+                self.model.set_classes(prompts)
             self.model.model.clip_model = None  # keep the embeddings, drop the text encoder
             self.model.save(str(baked))
         if subset is not None:
@@ -68,6 +75,17 @@ class OpenVocabDetector:
             world.model[-1].nc = len(idx)
             world.names = {i: vocabulary[k] for i, k in enumerate(subset)}
             self.ids = np.array(subset, dtype=np.int32)
+
+    @staticmethod
+    def _baked_donor(weights: Path, prompts: list[str]):
+        """A model of another size with the same vocabulary already baked in, if one is cached."""
+        from ultralytics import YOLOWorld
+
+        for path in sorted(weights.parent.glob(f"*-worldv2-vocab{len(prompts)}.pt")):
+            model = YOLOWorld(str(path)).model
+            if list(model.names) == prompts or list(dict(enumerate(model.names)).values()) == prompts:
+                return model
+        return None
 
     def __call__(self, rgb: np.ndarray) -> Detections:
         bgr = np.ascontiguousarray(rgb[:, :, ::-1])  # Ultralytics expects OpenCV-style BGR arrays
