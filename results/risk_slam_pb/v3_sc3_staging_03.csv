@@ -1,0 +1,13 @@
+scene,level,seed,task,margin,planned,violation,collision,length,clearance_indoor_plant,clearance_bike
+v3_sc3_staging_03,SLAM2,0,0,0.0,False,False,False,nan,nan,nan
+v3_sc3_staging_03,SLAM2,0,0,0.1,False,False,False,nan,nan,nan
+v3_sc3_staging_03,SLAM2,0,0,0.2,False,False,False,nan,nan,nan
+v3_sc3_staging_03,SLAM2,0,0,0.3,False,False,False,nan,nan,nan
+v3_sc3_staging_03,SLAM2,0,0,0.4,False,False,False,nan,nan,nan
+v3_sc3_staging_03,SLAM2,0,0,0.5,False,False,False,nan,nan,nan
+v3_sc3_staging_03,SLAM2,0,0,0.6,False,False,False,nan,nan,nan
+v3_sc3_staging_03,SLAM2,0,0,0.8,False,False,False,nan,nan,nan
+v3_sc3_staging_03,SLAM2,0,0,1.0,False,False,False,nan,nan,nan
+v3_sc3_staging_03,SLAM2,0,0,1.25,False,False,False,nan,nan,nan
+v3_sc3_staging_03,SLAM2,0,0,1.5,False,False,False,nan,nan,nan
+v3_sc3_staging_03,SLAM2,0,0,2.0,False,False,False,nan,nan,nan

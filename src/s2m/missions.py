@@ -30,7 +30,7 @@ from scipy import ndimage
 from s2m.analysis import ArmParams
 from s2m.conformal import distance_from, distance_to
 from s2m.drift import world_correction
-from s2m.experiment import R_MAX, SceneSetup, transform_entities
+from s2m.experiment import R_MAX, SceneSetup, predicted_map, transform_entities
 from s2m.mapping import build_map, floor_class_ids
 from s2m.planning import ROBOT_RADIUS, SAFETY_DISTANCE, dilate, evaluate_path, plan_many
 
@@ -153,7 +153,7 @@ def run_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,
     goal_masks = [disk(shape, cells[i][1], GOAL_TOL, res) if i in valid else None for i in range(len(tasks))]
     d_goal = {i: distance_to(disk(shape, cells[i][1], 0.0, res), res) for i in valid}
 
-    pred = build_map(s.obs, est_poses, s.spec, s.n_classes, "det")
+    pred = predicted_map(s, est_poses)
     base = pred.free() & ~dilate(pred.occupied(), ROBOT_RADIUS, res)
 
     plans, abstained, fell_back, exposed = {}, {}, {}, {}
@@ -193,8 +193,88 @@ def _plan_subset(trav, starts, goal_masks, valid, res):
 RISK_MARGINS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.25, 1.5, 2.0)
 
 
+def _simplify(pts: np.ndarray, tol: float) -> np.ndarray:
+    """Ramer-Douglas-Peucker: indices of waypoints such that the polyline stays within `tol` of `pts`."""
+    keep, stack = {0, len(pts) - 1}, [(0, len(pts) - 1)]
+    while stack:
+        a, b = stack.pop()
+        if b <= a + 1:
+            continue
+        seg = pts[b] - pts[a]
+        rel = pts[a + 1:b] - pts[a]
+        n = np.linalg.norm(seg)
+        d = np.abs(seg[0] * rel[:, 1] - seg[1] * rel[:, 0]) / n if n > 0 else np.linalg.norm(rel, axis=1)
+        k = int(np.argmax(d))
+        if d[k] > tol:
+            keep.add(a + 1 + k)
+            stack += [(a, a + 1 + k), (a + 1 + k, b)]
+    return np.array(sorted(keep))
+
+
+EXEC_STEP, EXEC_TURN = 0.03, np.radians(2.0)  # motion primitives of the mapping trajectories (drift levels are per step)
+
+
+def path_poses(cells: np.ndarray, spec, height: float = 1.5) -> np.ndarray:
+    """Level camera poses (camera-to-world, camera y = world -y) of a robot that follows a grid path:
+    the path is simplified to waypoints within one cell of it, and the robot turns in place and drives
+    straight between waypoints with the motion primitives of the mapping trajectories (3 cm, 2 deg)."""
+    from s2m.drift import rot_y
+
+    xs, zs = spec.cell_centers()
+    pts = np.stack([xs[cells[:, 1]], zs[cells[:, 0]]], 1)
+    way = pts[_simplify(pts, spec.res)] if len(pts) > 1 else pts
+
+    def pose(xz, yaw):
+        T = np.eye(4)
+        T[:3, :3] = rot_y(yaw) @ np.diag([-1.0, -1.0, 1.0])  # level camera looking along the heading
+        T[:3, 3] = [xz[0], height, xz[1]]
+        return T
+
+    poses, heading = [], None
+    for a, b in zip(way[:-1], way[1:]):
+        d = b - a
+        h = float(np.arctan2(d[0], d[1]))  # yaw of the camera z axis (x = sin, z = cos)
+        if heading is None:
+            heading = h
+            poses.append(pose(a, h))
+        turn = (h - heading + np.pi) % (2 * np.pi) - np.pi
+        for f in np.linspace(0, 1, int(np.ceil(abs(turn) / EXEC_TURN)) + 1)[1:]:
+            poses.append(pose(a, heading + f * turn))
+        heading = h
+        for f in np.linspace(0, 1, int(np.ceil(np.linalg.norm(d) / EXEC_STEP)) + 1)[1:]:
+            poses.append(pose(a + f * d, h))
+    return np.array(poses) if poses else np.zeros((0, 4, 4))
+
+
+def execution_outcomes(cells: np.ndarray, spec, d_avoid: np.ndarray, d_obst: np.ndarray, model,
+                       rng: np.random.Generator, draws: int) -> dict:
+    """Simulated executions of a planned path under continued drift. exec_unsafe / exec_collision: fraction
+    of draws that come closer than the safety distance to an avoid-class object / hit an obstacle;
+    exec_u: the largest deviation from the commanded position divided by the path length, first draw
+    (the score an execution log would give); exec_dev: mean over draws of the largest deviation."""
+    from s2m.drift import path_length, simulate
+
+    P = path_poses(cells, spec)
+    if len(P) < 2:
+        return {"exec_unsafe": 0.0, "exec_collision": 0.0, "exec_u": 0.0, "exec_dev": 0.0}
+    cmd = P[:, [0, 2], 3]
+    length = max(path_length(P), 1e-9)
+    unsafe = coll = 0
+    devs = []
+    for _ in range(draws):
+        q = simulate(P, model, rng)[:, [0, 2], 3]
+        r, c, inside = spec.to_cell(q[:, 0], q[:, 1])
+        r, c = np.clip(r, 0, spec.shape[0] - 1), np.clip(c, 0, spec.shape[1] - 1)
+        unsafe += bool(np.where(inside, d_avoid[r, c], np.inf).min() < SAFETY_DISTANCE)  # off the map: outside
+        coll += bool(np.where(inside, d_obst[r, c], 0.0).min() < ROBOT_RADIUS - spec.res)
+        devs.append(float(np.linalg.norm(q - cmd, axis=1).max()))
+    return {"exec_unsafe": unsafe / draws, "exec_collision": coll / draws, "exec_u": devs[0] / length,
+            "exec_dev": float(np.mean(devs))}
+
+
 def run_risk_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,
-                         margins=RISK_MARGINS, lam: float = 0.05) -> list[dict]:
+                         margins=RISK_MARGINS, lam: float = 0.05, exec_model=None, exec_draws: int = 0,
+                         rng: np.random.Generator | None = None) -> list[dict]:
     """Plan every task with a grid of uncalibrated margins and record each path's clearance to every
     avoid-class region (risk is assigned later from calibration scores, see scripts/analyze_risk.py).
 
@@ -212,11 +292,11 @@ def run_risk_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.nda
     starts = [cells[i][0] if i in valid else None for i in range(len(tasks))]
     goal_masks = [disk(shape, cells[i][1], GOAL_TOL, res) if i in valid else None for i in range(len(tasks))]
     d_goal = {i: distance_to(disk(shape, cells[i][1], 0.0, res), res) for i in valid}
-    pred = build_map(s.obs, est_poses, s.spec, s.n_classes, "det")
+    pred = predicted_map(s, est_poses)
     base = pred.free() & ~dilate(pred.occupied(), ROBOT_RADIUS, res)
     regions = {k: pred.region(k, lam) for k in s.avoid_ids}
     fields = {k: distance_to(regions[k], res) for k in s.avoid_ids}
-    rows = []
+    rows, exec_cache = [], {}
     for m in margins:
         keep = np.zeros(shape, bool)
         for k in s.avoid_ids:
@@ -230,5 +310,10 @@ def run_risk_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.nda
                 name = s.scene.classes[k]
                 row[f"clearance_{name}"] = (float(fields[k][paths[i][:, 0], paths[i][:, 1]].min()) - SAFETY_DISTANCE
                                             if paths[i] is not None else np.nan)
+            if exec_draws and paths[i] is not None:
+                key = paths[i].tobytes()
+                if key not in exec_cache:
+                    exec_cache[key] = execution_outcomes(paths[i], s.spec, d_avoid, d_obst, exec_model, rng, exec_draws)
+                row.update(exec_cache[key])
             rows.append(row)
     return rows

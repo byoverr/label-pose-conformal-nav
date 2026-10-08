@@ -49,14 +49,20 @@ if __name__ == "__main__":
     ap.add_argument("--avoid", nargs="+", default=list(AVOID_CLASSES), help="avoid classes used in planning")
     ap.add_argument("--vo", type=int, nargs="*", default=[], help="VO frame steps to add as levels")
     ap.add_argument("--vo-cache", type=Path, default=Path("data/cache/vo"))
+    ap.add_argument("--slam", type=int, nargs="*", default=[], help="SLAM frame steps to add as levels")
+    ap.add_argument("--slam-cache", type=Path, default=Path("data/cache/slam"))
     ap.add_argument("--only", nargs="*", default=None, help="run only these levels")
     ap.add_argument("--masks", type=Path, default=None, help="cached SAM masks (default: box + depth)")
-    ap.add_argument("--detections", type=Path, default=Path("data/cache/detections"))
+    ap.add_argument("--detections", type=Path, nargs="+", default=[Path("data/cache/detections")],
+                    help="one or more detection caches; several are fused into one map (--fuse)")
+    ap.add_argument("--fuse", default="max", choices=["max", "mean", "vote2"])
     ap.add_argument("--kind", default="pass_by", choices=["pass_by", "random"], help="task family")
     args = ap.parse_args()
 
     levels = {lv: m for lv, m in load_levels(args.levels).items() if args.only is None or lv in args.only}
-    vo_levels = [f"VO{s}" for s in args.vo if args.only is None or f"VO{s}" in args.only]
+    vo_cache = {**{f"VO{s}": args.vo_cache / f"{{}}_s{s}.npz" for s in args.vo},
+                **{f"SLAM{s}": args.slam_cache / f"{{}}_s{s}.npz" for s in args.slam}}
+    vo_levels = [lv for lv in vo_cache if args.only is None or lv in args.only]
     rows = [r for d in args.scores for r in load_scores(d, exclude=DEV_SCENES)]
     # scenes that have every requested level
     have = {}
@@ -84,7 +90,10 @@ if __name__ == "__main__":
 
         masks = None if args.masks is None else load_masks(args.masks / f"{name}.npz")
         setup = prepare(scene, precompute_observations(
-            scene, load_detections(args.detections / f"{name}.npz"), masks=masks), args.avoid)
+            scene, load_detections(args.detections[0] / f"{name}.npz"), masks=masks), args.avoid)
+        setup.extra_obs = [precompute_observations(scene, load_detections(d / f"{name}.npz"), masks=masks)
+                           for d in args.detections[1:]]
+        setup.fuse = args.fuse
         tasks = make_tasks(setup, args.tasks, seed=0, kind=args.kind)
         results = []
         for lv, model in levels.items():
@@ -93,7 +102,7 @@ if __name__ == "__main__":
                 for r in run_realization(setup, tasks, est, params[lv], fallback[lv]):
                     results.append({"scene": name, "level": lv, "seed": seed, **r})
         for lv in vo_levels:
-            est = vo_poses(args.vo_cache / f"{name}_s{lv[2:]}.npz", scene.poses)
+            est = vo_poses(Path(str(vo_cache[lv]).format(name)), scene.poses)
             for r in run_realization(setup, tasks, est, params[lv], fallback[lv]):
                 results.append({"scene": name, "level": lv, "seed": 0, **r})
         write_csv(out, results, MISSION_FIELDS)

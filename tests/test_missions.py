@@ -70,3 +70,38 @@ def test_exposure_flags_a_reachable_cell_near_the_true_object():
     assert _exposed(trav, [(10, 30)], d)
     assert not _exposed(trav, [(10, 5)], d)  # unreachable from the left half
     assert not _exposed(trav & (d > SAFETY_DISTANCE), [(10, 30)], d)  # keep-out holds
+
+
+def test_execution_without_drift_follows_the_plan_with_mapping_motion_primitives():
+    from s2m.drift import DriftModel, check_level, yaw_of
+    from s2m.missions import EXEC_STEP, EXEC_TURN, execution_outcomes, path_poses
+
+    spec = GridSpec(0.0, 0.0, 0.05, (60, 60))
+    cells = np.array([[10, 10 + i] for i in range(20)] + [[10 + i, 29] for i in range(1, 15)])
+    P = path_poses(cells, spec)
+    check_level(P)
+    xs, zs = spec.cell_centers()
+    assert np.allclose(P[0][[0, 2], 3], [xs[10], zs[10]]) and np.allclose(P[-1][[0, 2], 3], [xs[29], zs[24]])
+    rel = [np.linalg.inv(a) @ b for a, b in zip(P[:-1], P[1:])]
+    assert max(np.linalg.norm(r[[0, 2], 3]) for r in rel) <= EXEC_STEP + 1e-9
+    assert max(abs(yaw_of(r[:3, :3])) for r in rel) <= EXEC_TURN + 1e-9
+    far = np.full(spec.shape, 5.0)
+    out = execution_outcomes(cells, spec, far, far, DriftModel(), np.random.default_rng(0), 3)
+    assert out["exec_u"] < 1e-12 and out["exec_unsafe"] == 0.0 and out["exec_collision"] == 0.0
+    noisy = execution_outcomes(cells, spec, far, far, DriftModel(sigma_t=0.3, sigma_yaw_rot=0.3, sigma_yaw_trans=0.06),
+                               np.random.default_rng(0), 3)
+    assert noisy["exec_u"] > 0.0
+
+
+def test_fusion_rules_take_max_mean_and_second_largest_fraction():
+    from s2m.mapping import fuse_maps
+
+    spec = GridSpec(0.0, 0.0, 0.05, (2, 2))
+    maps = []
+    for frac in (0.2, 0.6, 0.9):
+        m = Map(spec, np.full((2, 2), 10.0), np.zeros((2, 2)), np.zeros((2, 2, 2)))
+        m.class_mass[0, 0, 1] = 10 * frac
+        maps.append(m)
+    for rule, want in (("max", 0.9), ("mean", 1.7 / 3), ("vote2", 0.6)):
+        f = fuse_maps(maps, rule)
+        assert np.isclose(f.class_mass[0, 0, 1] / f.n_obs[0, 0], want)

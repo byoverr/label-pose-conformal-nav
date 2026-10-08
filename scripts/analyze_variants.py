@@ -81,7 +81,9 @@ if __name__ == "__main__":
     # Real visual odometry: one realization per scene and VO setting.
     if Path("results/scores_vo").exists():
         vo = load_scores(Path("results/scores_vo"), exclude=DEV_SCENES)
-        vo_scenes = {r["scene"] for r in vo}
+        if Path("results/scores_slam").exists():  # loop-closure SLAM over the same odometry (scripts/run_slam.py)
+            vo += load_scores(Path("results/scores_slam"), exclude=DEV_SCENES)
+        vo_scenes = {r["scene"] for r in vo if r["level"].startswith("VO")}
         if len(vo_scenes) < 15:
             print(f"VO: only {len(vo_scenes)} scenes scored so far, skipped")
             vo = []
@@ -91,6 +93,9 @@ if __name__ == "__main__":
         table = []
         for lv in sorted({r["level"] for r in vo}):
             ates = np.array([r["ate"] for r in vo if r["level"] == lv])
+            if lv.startswith("SLAM") and len(ates) < len(vo_scenes):
+                print(f"{lv}: only {len(ates)} of {len(vo_scenes)} scenes so far, skipped")
+                continue
             n_cal = max(int(np.ceil(1 / args.alpha - 1)), round(0.6 * n))
             st = run_splits(rows, lv, args.alpha, n_cal, args.splits, classes=CLASSES)
             for cls in CLASSES:
@@ -119,7 +124,7 @@ if __name__ == "__main__":
     for name, table in panels.items():
         print(f"== {name}")
         for t in table:
-            if t["arm"] in ("label_only", "separate", "joint") and t["level"] in ("L0", "L2", "L3", "L4", "VO2", "VO4"):
+            if t["arm"] in ("label_only", "separate", "joint") and t["level"] in ("L0", "L2", "L3", "L4", "VO2", "VO4", "SLAM2"):
                 print("  " + " ".join(f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}" for k, v in t.items()))
 
     # Figure: coverage (top) and keep-out radius (bottom) of every arm in each variant.
@@ -139,7 +144,7 @@ if __name__ == "__main__":
         elif name == "vo":
             groups = [(f"{lv}\n{short[c]}", [r for r in t if r["level"] == lv and r["class"] == c])
                       for c in CLASSES for lv in sorted({r["level"] for r in t})]
-            title = "real RGB-D visual odometry (VO2, VO4 = every 2nd, 4th frame)"
+            title = "real RGB-D odometry (VO2, VO4 = every 2nd, 4th frame) and loop-closure SLAM2"
         else:
             groups = [(f"{lv}\n{short[c]}", [r for r in t if r["level"] == lv and r["class"] == c])
                       for c in CLASSES for lv in ("L0", "L3") if any(r["class"] == c for r in t)]

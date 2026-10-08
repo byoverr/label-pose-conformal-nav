@@ -36,8 +36,12 @@ that certifies every path, whichever planner produced it, and abstains when the 
 OSMa-Bench scenes, margins calibrated on labels or on pose alone lose coverage under the other error, and the sum of
 the two over-pays by up to a quarter. Label-set calibration degenerates to keeping out every occupied cell, because the
 detector truncates the edge of every object. The price of the guarantee is set by the worst calibration scene: a single
-missed plant makes its class abstain in a quarter to two thirds of the splits. With real visual odometry and no loop closure there is no
-useful guarantee.
+missed plant makes its class abstain in a quarter to two thirds of the splits. Fusing three detectors by the maximum
+removes all abstentions, while verifying detections with CLIP brings them back: the guarantee rewards recall, not
+precision. Calibrating the expected share of unsafe missions instead of the map keeps almost all of the uncalibrated
+planner's successes with 0.6\,\% unsafe missions instead of 7--8\,\%. Plans certified at query time stay safe when
+executed under continued drift of up to 7~cm. With visual odometry there is no useful guarantee; loop-closure SLAM cuts
+the median pose error threefold, but the scenes where it finds no loop set the margin.
 \end{abstract}
 
 \section{Introduction}
@@ -65,9 +69,11 @@ Contributions:
   abstains when it would be uninformative;
   \item an analysis of joint versus separate calibration: the sum of two separately calibrated margins guarantees only
   $1 - 2\alpha$, under a premise that geometry does not imply, and we construct a case where it under-covers;
-  \item an evaluation on 21 OSMa-Bench scenes with five levels of synthetic drift, real visual odometry, MobileSAM masks
-  and a transfer to HM3D, which reports the price of the guarantee (margin, abstention, solved tasks) next to coverage
-  and compares the method with label-set calibration and with a margin without semantics.
+  \item an evaluation on 21 OSMa-Bench scenes with five levels of synthetic drift, real visual odometry and loop-closure
+  SLAM, MobileSAM masks and a transfer to HM3D, which reports the price of the guarantee (margin, abstention, solved
+  tasks) next to coverage and compares the method with label-set calibration and with a margin without semantics;
+  \item a study of what lowers the price: detector ensembles and a CLIP-verified cascade, a mission-level guarantee by
+  conformal risk control, and execution under continued drift.
 \end{itemize}
 
 \section{Related Work}
@@ -404,6 +410,20 @@ in 92--94\,\% of the realizations instead of 88--92\,\% at a 0.03--0.26~m larger
 would need a feature that predicts the miss; path length does not (Spearman $-0.09$ to $0.15$), and a whole-object
 miss leaves no trace on the map for any feature to see.
 
+\textbf{Ensembles and a cascade.} Since each detector misses a different class, we fuse the three maps built from the
+same points, taking per cell the maximum, the mean or the second largest of the class fractions, and report all three
+rules. The maximum removes abstention for all three classes up to 45~cm (the TV stand: 0\,\% instead of 74--95\,\%), with
+L0 margins of 0.71, 0.75 and 1.40~m for plant, bike and TV stand and certified coverage 0.92--0.94; class regions grow by
+12--41\,\% (five scenes checked). A path then exists in 60 and 47\,\% of the hard tasks at L0 and L2 (32 and 31\,\% with one detector) but in
+22\,\% at L3 (30\,\%): solvability comes in whole scenes, and one scene where the ensemble finally sees the plant
+closes its passage. The mean keeps the TV stand abstaining (60--64\,\%), agreement of two detectors loses it (97--99\,\%) and solves no
+more hard tasks than one detector.
+A cascade that verifies the fused detections with CLIP~\cite{clip} on box crops (threshold set on the development
+scene) drops whole plants and TV stands in three test scenes each, and both classes abstain in 98--99\,\% of the
+splits (a path in 19, 12 and 4\,\% of the hard tasks); explicit multi-frame voting raises misses already on the development scene. The guarantee pays for the worst
+miss, so recall wins and any verification that can only remove detections only adds misses. The ensemble was proposed
+after seeing the detectors' misses on these scenes, so its gain may be optimistic.
+
 \textbf{Risk instead of abstention.} A path with clearance $c_k$ to the region of class $k$ can be unsafe for $k$ only if
 $s_k > c_k$, so $\rho_k = (1 + \#\{i: s_{i,k} \ge \min(c_k, R_{\max})\})/(n + 1)$ over the calibration scores is a conformal
 p-value: $\mathbb P(\text{unsafe and } \rho_k \le a) \le a$ even for a path chosen on the test map. Planning with a grid
@@ -412,6 +432,29 @@ of margins and certifying the first path with $\rho_k \le a/2$ for both classes 
 most 5.7\,\% of the certified paths unsafe. It does not raise feasibility, but it replaces abstention by an explicit
 risk and explains it: with 20 calibration scenes the smallest risk per class is 1/21, and the scene with the missed
 plant raises it to 2/21.
+
+\textbf{Calibrating missions instead of the map.} The joint margin promises that every object of the class lies within
+it, including objects no path goes near. Conformal risk control~\cite{crc} calibrates what the robot does instead: for a
+margin $m$ on the grid, the loss $L_i(m)$ of scene $i$ is the fraction of its tasks whose path at margin $m$ is unsafe,
+made monotone by $\tilde L_i(m) = \max_{m' \ge m} L_i(m')$, and the smallest $m$ with
+$\frac{1}{n+1}\sum_i \tilde L_i(m) + \frac{1}{n+1} \le a$ gives $\mathbb E[L_{\text{test}}] \le a$. This is a weaker,
+mission-level guarantee: one test scene may be unsafe throughout. On random tasks at $a = 0.05$ it succeeds in 94, 87
+and 80\,\% of the missions at L0, L2 and L3, almost as often as the uncalibrated planner (93, 88, 80\,\%), with at most
+0.6\,\% unsafe instead of 7--8\,\% (the joint margin: 78, 74, 68\,\%); the worst scene has 13\,\% unsafe missions. On
+hard tasks (15 scenes, so $a = 0.05 < 1/(n+1)$ is infeasible) $a = 0.1$ finds a path in 40, 57 and 36\,\% of the tasks
+instead of 30--32\,\%, with at most 1.3\,\% unsafe; with the detector ensemble it finds one in 41, 83 and 54\,\% with at
+most 2.2\,\% unsafe, the best combination we tested.
+
+\textbf{Execution.} The guarantee concerns the plan at query time. When the robot drives each path with the motion
+primitives of the recorded trajectories while its pose estimate keeps drifting at the same level, the deviation from the
+commanded path is 0.3 and 0.8\,\% of the distance travelled at L2 and L3 (95th percentile up to 2\,\%), and paths
+certified at plan time stay safe: at most 0.6\,\% of their executions are unsafe. At L4 the deviation is about 5\,\%:
+1.2\,\% of the certified hard-task paths become unsafe during execution and 18\,\% touch an obstacle. A conformal bound
+on the deviation per metre, $\hat u$, added to the clearance ($\rho_k(c_k - \hat u L)$, with a $1/25$ share of the risk
+budget for the deviation) restores the guarantee for execution at little cost at L2--L3 ($\hat u \approx 0.01$--$0.03$;
+72 instead of 72--77\,\% of the random tasks certified) but at L4 ($\hat u \approx 0.17$) certifies 21\,\% instead of
+52\,\% and no hard task. Risk control with the loss ``unsafe during execution'' covers execution directly: 87 and
+80\,\% successful random missions at L2 and L3 for $a = 0.05$.
 
 \subsection{When does the sum of margins under-cover?}\label{sec:composition}
 
@@ -442,6 +485,13 @@ Frame-to-frame odometry without loop closure errs in jumps, mostly during in-pla
 classes; when it certifies, coverage is 0.71--0.72. In missions it finds no path: both classes fall back to the
 geometry-only certificate, which closes almost all free space at this error. The uncalibrated planner finds a path in
 23\,\% of the hard tasks, and 62\,\% of those paths are unsafe. With this pose quality there is no useful guarantee.
+Pose-graph SLAM with loop closures on top of the same odometry, following Choi et al.~\cite{choi2015} (keyframes every
+five frames, ORB--PnP loop candidates verified by RGB-D odometry and point-cloud overlap, thresholds set on the
+development scene), lowers the median ATE from 78 to 24~cm, below 30~cm in 12 of 21 scenes instead of two. Two scenes
+find no loop (3.3 and 2.0~m) and set the margin: the labels-only bike coverage is 0.80, the joint margin covers 0.92
+at 1.59~m without abstention, but finds a path in only 1\,\% of the hard tasks; the mission-level guarantee gives
+36\,\% successful random missions at $a = 0.05$ with 0.5\,\% unsafe, out of 41\,\% for which the map has any path.
+The tail of the localization error, not its median, decides.
 Margins calibrated on ReplicaCAD and tested on HM3D scenes~\cite{hm3d} of OSMa-Bench give one counterexample: of the
 two scenes in which a plant is visible from the trajectory, the detector finds one (miss 0.18~m) and splits the other
 across three wrong classes (2.9~m). A milder shift, a held-out layout of the same family (four groups of five scenes and
@@ -461,10 +511,11 @@ keep-out zone. The bottleneck is confident misses and class swaps of whole objec
 
 Limitations. One family of 21 simulated scenes and one lighting condition; coverage on random splits of these scenes
 holds by construction, and only bootstrap intervals 0.1--0.15 wide, a held-out layout and two HM3D scenes speak to new
-scenes. Drift is synthetic and independent of detector errors; real odometry is tested only without loop closure. The
-perception is a box detector, not a full mapper. The guarantee is marginal over calibration sets, per class, and about
-the plan in the planner frame at query time: execution-time localization error and collisions with obstacles are not
-covered, and discretization can take up to 7~cm of the safety distance. The hard task family and the mission classes
+scenes. Drift is synthetic and independent of detector errors; real localization is tested with odometry and our own
+Open3D-based loop-closure SLAM only. The perception is a box detector, not a full mapper. The main guarantee is marginal
+over calibration sets, per class, and about the plan at query time; execution is tested with the drift model, the
+execution bound pools paths and is only approximately exchangeable, collisions with obstacles are not covered, and
+discretization can take up to 7~cm of the safety distance. The hard task family and the mission classes
 were chosen after first runs, and label sets are our re-implementation on final maps, without the authors' exploration
 mode.
 
@@ -474,8 +525,10 @@ The miss distance in the planner frame is one calibrated quantity that gives a p
 against label and pose errors together, and abstains when the guarantee would be useless. Margins calibrated on either
 error alone lose coverage under the other, the sum of separate margins over-pays or under-covers depending on an unknown
 placement of failures, and label-set calibration degenerates to keeping out everything occupied. The price is set by
-the worst perception error among the calibration scenes, which points to more calibration scenes, SLAM with loop
-closures, full open-vocabulary mappers and execution-time pose error as next steps.
+the worst perception or localization error among the calibration scenes. Fusing detectors for recall and calibrating
+the share of unsafe missions instead of the map lower it, and execution under drift of up to 7~cm does not break it;
+more calibration scenes, SLAM that closes loops in every scene, relocalization during execution and full
+open-vocabulary mappers are the next steps.
 
 \begin{thebibliography}{99}
 \footnotesize
@@ -505,7 +558,10 @@ closures, full open-vocabulary mappers and execution-time pose error as next ste
 \bibitem{steinbrucker} F.~Steinbr\"ucker, J.~Sturm, and D.~Cremers, ``Real-time visual odometry from dense RGB-D images,'' in \emph{Proc. IEEE ICCV Workshops}, 2011, pp. 719--722, doi: 10.1109/ICCVW.2011.6130321.
 \bibitem{mobilesam} C.~Zhang \emph{et al.}, ``Faster segment anything: Towards lightweight SAM for mobile applications,'' arXiv:2306.14289, 2023.
 \bibitem{yoloe} A.~Wang \emph{et al.}, ``YOLOE: Real-time seeing anything,'' in \emph{Proc. IEEE/CVF ICCV}, 2025, pp. 24591--24602, doi: 10.1109/ICCV51701.2025.02280.
+\bibitem{clip} A.~Radford \emph{et al.}, ``Learning transferable visual models from natural language supervision,'' in \emph{Proc. ICML}, PMLR vol. 139, 2021, pp. 8748--8763, arXiv:2103.00020.
 \bibitem{hcp} Y.~Lee, R.~F.~Barber, and R.~Willett, ``Distribution-free inference with hierarchical data,'' \emph{ACM J. Data Sci.}, 2026, doi: 10.1145/3786352.
+\bibitem{crc} A.~N.~Angelopoulos, S.~Bates, A.~Fisch, L.~Lei, and T.~Schuster, ``Conformal risk control,'' in \emph{Proc. ICLR}, 2024, arXiv:2208.02814.
+\bibitem{choi2015} S.~Choi, Q.-Y.~Zhou, and V.~Koltun, ``Robust reconstruction of indoor scenes,'' in \emph{Proc. IEEE CVPR}, 2015, pp. 5556--5565, doi: 10.1109/CVPR.2015.7299195.
 \bibitem{hm3d} S.~K.~Ramakrishnan \emph{et al.}, ``Habitat-Matterport 3D dataset (HM3D): 1000 large-scale 3D environments for embodied AI,'' in \emph{NeurIPS Datasets and Benchmarks}, 2021, arXiv:2109.08238.
 \end{thebibliography}
 

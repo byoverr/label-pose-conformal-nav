@@ -5,6 +5,9 @@ scripts/run_missions.py); their miss distances are saved next to the paths, so s
 assign every path a conformal risk bound without re-planning. Writes results/risk_<kind>/<scene>.csv and
 results/risk_<kind>/cal_<scene>.csv (resumable).
 
+With --exec-draws N every distinct path is also executed N times under continued drift of the same level
+(s2m.missions.execution_outcomes) and the output goes to results/exec_<kind>/ (scripts/analyze_execution.py).
+
 Example: python scripts/run_risk.py --kind pass_by --part 0/2
 """
 
@@ -21,6 +24,7 @@ from s2m.entities import class_ids
 from s2m.experiment import load_levels, prepare, stable_seed
 from s2m.io import DEV_SCENES, write_csv
 from s2m.mapping import precompute_observations
+from s2m.odometry import vo_poses
 from s2m.missions import make_tasks, run_risk_realization
 from s2m.perception import load_detections
 
@@ -37,11 +41,17 @@ if __name__ == "__main__":
     ap.add_argument("--tasks", type=int, default=20)
     ap.add_argument("--kind", default="pass_by", choices=["pass_by", "random"])
     ap.add_argument("--part", default="0/1")
+    ap.add_argument("--exec-draws", type=int, default=0)
+    ap.add_argument("--slam", type=Path, default=None, help="SLAM pose cache: one level SLAM2 instead of synthetic drift")
+    ap.add_argument("--detections-extra", type=Path, nargs="*", default=[], help="more detection caches, fused (max)")
+    ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
-    out_dir = Path(f"results/risk_{'pb' if args.kind == 'pass_by' else 'rand'}")
+    out_dir = args.out or Path(f"results/{'exec' if args.exec_draws else 'risk'}_{'pb' if args.kind == 'pass_by' else 'rand'}")
     out_dir.mkdir(parents=True, exist_ok=True)
     levels = {lv: m for lv, m in load_levels(args.levels).items() if lv in args.only}
+    if args.slam is not None:
+        levels = {"SLAM2": None}
     rows = load_scores(args.scores, exclude=DEV_SCENES)
     by = {}
     for r in rows:
@@ -65,14 +75,18 @@ if __name__ == "__main__":
 
         scene = load_scene(args.data / name)
         setup = prepare(scene, precompute_observations(scene, load_detections(args.detections / f"{name}.npz")), list(AVOID))
+        setup.extra_obs = [precompute_observations(scene, load_detections(d / f"{name}.npz")) for d in args.detections_extra]
         tasks = make_tasks(setup, args.tasks, seed=0, kind=args.kind)
         res = []
         for lv, model in levels.items():
-            for seed in range(1 if lv == "L0" else args.seeds):
-                est = simulate(scene.poses, model, np.random.default_rng(stable_seed(7, seed, name)))
-                for r in run_risk_realization(setup, tasks, est):
+            for seed in range(1 if lv in ("L0", "SLAM2") else args.seeds):
+                est = (vo_poses(args.slam / f"{name}_s2.npz", scene.poses) if lv == "SLAM2" else
+                       simulate(scene.poses, model, np.random.default_rng(stable_seed(7, seed, name))))
+                for r in run_risk_realization(setup, tasks, est, exec_model=model, exec_draws=args.exec_draws,
+                                              rng=np.random.default_rng(stable_seed(11, seed, name))):
                     res.append({"scene": name, "level": lv, "seed": seed, **r})
         fields = ["scene", "level", "seed", "task", "margin", "planned", "violation", "collision", "length"] + \
-                 [f"clearance_{c}" for c in AVOID]
+                 [f"clearance_{c}" for c in AVOID] + \
+                 (["exec_unsafe", "exec_collision", "exec_u", "exec_dev"] if args.exec_draws else [])
         write_csv(out, res, fields)
         print(f"{name}: {len(tasks)} tasks, {len(res)} rows, {time.time() - t:.0f} s", flush=True)

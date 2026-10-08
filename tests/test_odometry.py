@@ -61,3 +61,14 @@ def test_planar_motion_keeps_yaw_and_floor_translation():
     N[1, 3] = 0.05
     out = planar_motion(N)
     assert np.allclose(out[:3, 1], [0, 1, 0]) and out[1, 3] == 0.0
+
+
+def test_chain_information_adds_step_covariances():
+    from s2m.slam import chain_information
+
+    rng = np.random.default_rng(0)
+    A = rng.normal(size=(6, 6))
+    info = A @ A.T + 6 * np.eye(6)
+    assert np.allclose(chain_information(np.stack([info] * 4)), info / 4, rtol=1e-5)
+    mixed = np.stack([info, np.diag([1e6, 1e6, 1e6, 1e4, 1e4, 1e4]), np.zeros((6, 6))])
+    assert np.linalg.eigvalsh(chain_information(mixed)).min() > 0  # positive definite, failed step included

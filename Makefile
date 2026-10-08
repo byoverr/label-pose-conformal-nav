@@ -15,7 +15,7 @@ PB := --avoid indoor_plant bike
 CLOSED5 := indoor_plant bike tv_stand sofa table
 
 .PHONY: setup data scores coverage missions main comparison alpha composition sam vo hm3d grid \
-        detector yoloe regions risk robustness tables docs test all
+        detector yoloe regions risk ensemble slam execution cascade mission_risk robustness tables docs test all
 
 setup:
 	python3.12 -m venv .venv
@@ -126,7 +126,59 @@ risk:  # risk as an output instead of abstention
 	$(PY) scripts/run_risk.py --kind random
 	$(PY) scripts/analyze_risk.py
 
-robustness: alpha composition sam vo hm3d grid detector yoloe regions risk
+ENS := --detections data/cache/detections data/cache/detections_x data/cache/detections_yoloe
+
+ensemble:  # the three detectors fused into one map (needs make detector yoloe); every fusion rule is reported
+	for rule in max mean vote2; do \
+		$(PY) scripts/compute_scores.py data/replica_cad/* $(ENS) --fuse $$rule --out results/scores_ens_$$rule && \
+		$(PY) scripts/analyze_coverage.py --scores results/scores_ens_$$rule --tag _ens_$$rule && \
+		$(PY) scripts/run_missions.py --scores results/scores_ens_$$rule $(ENS) --fuse $$rule $(PB) --out results/missions_pb_ens_$$rule && \
+		$(PY) scripts/analyze_missions.py --dir results/missions_pb_ens_$$rule --tag _pb_ens_$$rule --no-h4 && \
+		$(PY) scripts/run_missions.py --kind random --scores results/scores_ens_$$rule $(ENS) --fuse $$rule $(PB) \
+			--out results/missions_rand_ens_$$rule && \
+		$(PY) scripts/analyze_missions.py --dir results/missions_rand_ens_$$rule --tag _rand_ens_$$rule --no-h4 || exit 1; \
+	done
+
+slam:  # loop-closure SLAM over the cached odometry (needs make vo)
+	$(PY) scripts/run_slam.py data/replica_cad/*
+	$(PY) scripts/run_missions.py --scores results/scores results/scores_vo results/scores_slam --vo 2 --slam 2 \
+		--only L0 VO2 SLAM2 $(PB) --out results/missions_pb_slam
+	$(PY) scripts/analyze_missions.py --dir results/missions_pb_slam --tag _pb_slam --levels L0 VO2 SLAM2 \
+		--scores results/scores results/scores_vo results/scores_slam --no-h4
+
+execution:  # certified paths executed under continued drift
+	$(PY) scripts/run_risk.py --kind pass_by --only L2 L3 L4 --exec-draws 20
+	$(PY) scripts/run_risk.py --kind random --only L2 L3 L4 --exec-draws 20
+	$(PY) scripts/analyze_execution.py
+
+cascade:  # union of the three detectors checked by CLIP ViT-B/16 (models/clip/, downloaded on first use)
+	$(PY) scripts/run_verifier.py data/replica_cad/*
+	$(PY) scripts/select_cascade.py
+	$(PY) scripts/check_frame_vote.py
+	$(PY) scripts/make_cascade.py data/replica_cad/*
+	$(PY) scripts/compute_scores.py data/replica_cad/* --detections data/cache/detections_cascade --out results/scores_cascade
+	$(PY) scripts/analyze_coverage.py --scores results/scores_cascade --tag _cascade
+	$(PY) scripts/run_missions.py --scores results/scores_cascade --detections data/cache/detections_cascade $(PB) \
+		--out results/missions_pb_cascade
+	$(PY) scripts/analyze_missions.py --dir results/missions_pb_cascade --tag _pb_cascade --no-h4
+	$(PY) scripts/run_missions.py --kind random --scores results/scores_cascade --detections data/cache/detections_cascade \
+		$(PB) --out results/missions_rand_cascade
+	$(PY) scripts/analyze_missions.py --dir results/missions_rand_cascade --tag _rand_cascade --no-h4
+
+mission_risk: risk execution slam ensemble  # conformal risk control on the planner (mission-level guarantee)
+	for kind in pass_by random; do \
+		$(PY) scripts/run_risk.py --kind $$kind --scores results/scores_slam --slam data/cache/slam \
+			--out results/risk_slam_$$(test $$kind = pass_by && echo pb || echo rand) && \
+		$(PY) scripts/run_risk.py --kind $$kind --scores results/scores_ens_max \
+			--detections-extra data/cache/detections_x data/cache/detections_yoloe \
+			--out results/risk_ens_$$(test $$kind = pass_by && echo pb || echo rand) || exit 1; \
+	done
+	$(PY) scripts/analyze_crc.py
+	$(PY) scripts/analyze_crc.py --execution
+	$(PY) scripts/analyze_crc.py --root risk_slam
+	$(PY) scripts/analyze_crc.py --root risk_ens
+
+robustness: alpha composition sam vo hm3d grid detector yoloe regions risk ensemble slam execution cascade mission_risk
 	$(PY) scripts/analyze_variants.py
 
 # --- documents ---------------------------------------------------------------------------------

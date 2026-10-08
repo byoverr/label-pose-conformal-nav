@@ -122,8 +122,10 @@ def variants_table():
     vo = Path("results/tables/variants_vo.csv")
     if vo.exists():
         rows = read_csv(vo)
-        for lv in sorted({r["level"] for r in rows}):
-            specs.append((f"одометрия, каждый {lv[2:]}-й кадр", [r for r in rows if r["level"] == lv]))
+        for lv in sorted({r["level"] for r in rows}, key=lambda lv: (lv.startswith("SLAM"), lv)):
+            name = (f"одометрия, каждый {lv[2:]}-й кадр" if lv.startswith("VO") else
+                    f"SLAM с замыканиями, каждый {lv[4:]}-й кадр")
+            specs.append((name, [r for r in rows if r["level"] == lv]))
     if not specs:
         return
     lines = ["\\begin{tabular}{l|" + "cc" * len(arms) + "|" + "cc" * len(arms) + "}", "\\toprule",
@@ -170,20 +172,23 @@ def comparison_table():
 
 def detector_table():
     """Detectors (YOLO-World v2-s main, v2-x, YOLOE-v8-S): joint margin and abstention per class, missions."""
-    tags = [(tag, name) for tag, name in (("", "YOLO-World v2-s"), ("_x", "YOLO-World v2-x"), ("_yoloe", "YOLOE-v8-S"))
+    tags = [(tag, name) for tag, name in (("", "YOLO-World v2-s"), ("_x", "YOLO-World v2-x"), ("_yoloe", "YOLOE-v8-S"),
+                                         ("_ens_max", "ансамбль, максимум"), ("_ens_mean", "ансамбль, среднее"),
+                                         ("_ens_vote2", "ансамбль, второе"), ("_cascade", "каскад с CLIP"))
             if Path(f"results/tables/coverage{tag}.csv").exists()]
     if len(tags) < 2:
         return
     g = lambda rows, **kw: next(r for r in rows if all(r[k] == v for k, v in kw.items()))
-    lines = ["\\begin{tabular}{l|cc|cc|cc|cc}", "\\toprule",
-             "Детектор & \\multicolumn{2}{c|}{$\\hat r$ / отказ, L0} & \\multicolumn{2}{c|}{$\\hat r$ / отказ, L4} & "
+    lines = ["\\begin{tabular}{l|ccc|cc|cc|cc}", "\\toprule",
+             "Детектор & \\multicolumn{3}{c|}{$\\hat r$ / отказ, L0} & \\multicolumn{2}{c|}{$\\hat r$ / отказ, L4} & "
              "\\multicolumn{2}{c|}{трудные: путь} & \\multicolumn{2}{c}{случайные: успех} \\\\",
-             " & растение & велосипед & растение & велосипед & L0 & L3 & L0 & L3 \\\\", "\\midrule"]
+             " & растение & велосипед & тумба & растение & велосипед & L0 & L3 & L0 & L3 \\\\", "\\midrule"]
     for tag, name in tags:
         c = read_csv(f"results/tables/coverage{tag}.csv")
         cell = lambda lv, cls: (f"{fmt(g(c, level=lv, arm='joint', **{'class': cls})['radius_median'])} / "
                                 f"{fmt(g(c, level=lv, arm='joint', **{'class': cls})['abstain_rate'])}")
-        cells = [cell(lv, cls) for lv in ("L0", "L4") for cls in ("indoor_plant", "bike")]
+        cells = [cell("L0", cls) for cls in ("indoor_plant", "bike", "tv_stand")]
+        cells += [cell("L4", cls) for cls in ("indoor_plant", "bike")]
         for kind, key in (("pb", "planned"), ("rand", "success")):
             path = Path(f"results/tables/missions_{kind}{tag}.csv")
             m = read_csv(path) if path.exists() else None
@@ -191,6 +196,66 @@ def detector_table():
         lines.append(f"{name} & " + " & ".join(cells) + " \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
     (OUT / "detector.tex").write_text("\n".join(lines) + "\n")
+
+def crc_table():
+    """Guarantees of different strength on the same tasks: map-level joint margin, per-path risk, planner-level
+    conformal risk control (plan and execution). Success and unsafe share of all task realizations."""
+    if not Path("results/tables/crc_risk.csv").exists():
+        return
+    crc = read_csv("results/tables/crc_risk.csv")
+    exe = read_csv("results/tables/crc_exec_execution.csv") if Path("results/tables/crc_exec_execution.csv").exists() else []
+    ens = read_csv("results/tables/crc_risk_ens.csv") if Path("results/tables/crc_risk_ens.csv").exists() else []
+    mis = {k: read_csv(f"results/tables/missions_{k}.csv") for k in ("rand", "pb")}
+    levels = ("L0", "L2", "L3")
+    get = lambda rows, **kw: next((r for r in rows if all(str(r[k]) == str(v) for k, v in kw.items())), None)
+    specs = [("без калибровки", "---", lambda kind, lv: get(mis[kind], level=lv, arm="uncalibrated"), "violation"),
+             ("совместный запас", "$\\alpha = 0{,}1$ на класс", lambda kind, lv: get(mis[kind], level=lv, arm="joint"), "violation"),
+             ("риск пути", "$a = 0{,}2$", lambda kind, lv: get(crc, tasks=kind, level=lv, target="0.2", rule="path"), "unsafe"),
+             ("риск планировщика", "$a = 0{,}05$", lambda kind, lv: get(crc, tasks=kind, level=lv, target="0.05", rule="crc"), "unsafe"),
+             ("риск планировщика", "$a = 0{,}1$", lambda kind, lv: get(crc, tasks=kind, level=lv, target="0.1", rule="crc"), "unsafe"),
+             ("то же, по исполнению", "$a = 0{,}1$", lambda kind, lv: get(exe, tasks=kind, level=lv, target="0.1", rule="crc"), "unsafe"),
+             ("риск планировщика, ансамбль", "$a = 0{,}05$", lambda kind, lv: get(ens, tasks=kind, level=lv, target="0.05", rule="crc"), "unsafe"),
+             ("риск планировщика, ансамбль", "$a = 0{,}1$", lambda kind, lv: get(ens, tasks=kind, level=lv, target="0.1", rule="crc"), "unsafe")]
+    lines = ["\\begin{tabular}{ll|ccc|c|ccc|c}", "\\toprule",
+             "Правило & Уровень & \\multicolumn{4}{c|}{случайные задачи} & \\multicolumn{4}{c}{трудные задачи} \\\\",
+             " & & L0 & L2 & L3 & опасн. & L0 & L2 & L3 & опасн. \\\\", "\\midrule"]
+    for name, level, src, unsafe_key in specs:
+        cells = []
+        for kind in ("rand", "pb"):
+            rows = [src(kind, lv) for lv in levels]
+            cells += [fmt(r["success"]) if r else "---" for r in rows]
+            u = [float(r[unsafe_key]) for r in rows if r]
+            cells.append(fmt(max(u), 3) if u else "---")
+        lines.append(f"{name} & {level} & " + " & ".join(cells) + " \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    (OUT / "crc.tex").write_text("\n".join(lines) + "\n")
+
+
+def execution_table():
+    """Plan-certified paths executed under continued drift (hard tasks), plan rule vs execution-aware rule, a = 0.2."""
+    path = Path("results/tables/execution.csv")
+    if not path.exists():
+        return
+    rows = read_csv(path)
+    lines = ["\\begin{tabular}{l|cc|ccc|ccc}", "\\toprule",
+             "Дрейф & \\multicolumn{2}{c|}{отклонение, \\% пути} & \\multicolumn{3}{c|}{сертификат по плану} & "
+             "\\multicolumn{3}{c}{с запасом на исполнение} \\\\",
+             " & медиана & 95\\,\\% & путь & опасн. & столкн. & путь & опасн. & столкн. \\\\", "\\midrule"]
+    import numpy as np
+    for kind, title in (("pb", "трудные"), ("rand", "случайные")):
+        for lv in ("L2", "L3", "L4"):
+            g = lambda rule: next((r for r in rows if r["tasks"] == kind and r["level"] == lv and r["rule"] == rule
+                                   and r["target_risk"] == "0.2"), None)
+            p, e = g("plan"), g("execution")
+            if p is None:
+                continue
+            cells = [fmt(100 * float(p["u_median"]), 1), fmt(100 * float(p["u_q95"]), 1)]
+            for r in (p, e):
+                cells += [fmt(r["certified"]), fmt(r["exec_unsafe_given_cert"], 3), fmt(r["exec_collision_given_cert"])]
+            lines.append(f"{lv}, {title} & " + " & ".join(cells) + " \\\\")
+    lines += ["\\bottomrule", "\\end{tabular}"]
+    (OUT / "execution.tex").write_text("\n".join(lines) + "\n")
+
 
 PAPER = Path("paper/tables")
 ARM_EN = {"uncalibrated": "uncalibrated", "label_cell": "label sets~\\cite{sundarsingh}", "geometry": "geometry only",
@@ -263,6 +328,8 @@ if __name__ == "__main__":
     comparison_table()
     variants_table()
     detector_table()
+    crc_table()
+    execution_table()
     missions_table("_pb")
     PAPER.mkdir(parents=True, exist_ok=True)
     paper_coverage_table()

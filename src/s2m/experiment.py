@@ -13,7 +13,7 @@ over random scene splits, in the analysis step.
 from __future__ import annotations
 
 import zlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import yaml
@@ -23,7 +23,7 @@ from s2m.data import Scene
 from s2m.drift import DriftModel, ate, endpoint_drift, simulate, world_correction
 from s2m.entities import AVOID_CLASSES, Entity, class_ids, extract_entities
 from s2m.grid import GridSpec
-from s2m.mapping import FrameObs, Map, build_map, fixed_spec, floor_class_ids
+from s2m.mapping import FrameObs, Map, build_map, fixed_spec, floor_class_ids, fuse_maps
 
 LAMBDAS = np.round(np.arange(0.0, 0.5001, 0.01), 2)  # map thresholds evaluated for the pred map
 R_MAX = 3.0  # metres; a larger miss means the class is effectively missing from the map
@@ -58,6 +58,14 @@ class SceneSetup:
     avoid_ids: list[int]
     entities: list[Entity]  # avoid-class entities in the GT world frame
     truth: Map  # GT map in the GT world frame
+    extra_obs: list[list[FrameObs]] = field(default_factory=list)  # other detectors on the same points
+    fuse: str = "max"  # how detector maps are combined (s2m.mapping.fuse_maps)
+
+
+def predicted_map(setup: SceneSetup, poses: np.ndarray) -> Map:
+    """The detector map placed with `poses`; several detectors are fused cell by cell."""
+    maps = [build_map(o, poses, setup.spec, setup.n_classes, "det") for o in [setup.obs, *setup.extra_obs]]
+    return fuse_maps(maps, setup.fuse)
 
 
 def prepare(scene: Scene, obs: list[FrameObs], avoid_names=AVOID_CLASSES) -> SceneSetup:
@@ -74,7 +82,7 @@ def realization_scores(setup: SceneSetup, est_poses: np.ndarray) -> dict:
     D = world_correction(est_poses, gt_poses)
     ents = transform_entities(s.entities, s.spec, D[-1])
 
-    pred = build_map(s.obs, est_poses, s.spec, s.n_classes, "det")
+    pred = predicted_map(s, est_poses)
     gtlab = build_map(s.obs, est_poses, s.spec, s.n_classes, "gt", floor_class_ids(s.scene))
 
     row = {"ate": ate(est_poses, gt_poses), "endpoint_drift": endpoint_drift(est_poses, gt_poses)}

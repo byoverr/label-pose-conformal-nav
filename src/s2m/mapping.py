@@ -121,6 +121,30 @@ def build_map(obs: list[FrameObs], poses: np.ndarray, spec: GridSpec, n_classes:
     return Map(spec, n_obs.reshape(h, w), floor.reshape(h, w), mass.reshape(h, w, n_classes))
 
 
+FUSE_RULES = ("max", "mean", "vote2")
+
+
+def fuse_maps(maps: list[Map], rule: str) -> Map:
+    """Combine detector maps built from the same points (same n_obs) into one map.
+
+    The fused class fraction per cell is the max, the mean, or the second largest ("vote2": the cell
+    clears a threshold only if at least two detectors put it there) of the detectors' fractions.
+    """
+    if len(maps) == 1:
+        return maps[0]
+    probs = np.stack([m.class_mass / np.maximum(m.n_obs, 1)[:, :, None] for m in maps])
+    if rule == "max":
+        p = probs.max(0)
+    elif rule == "mean":
+        p = probs.mean(0)
+    elif rule == "vote2":
+        p = np.sort(probs, axis=0)[-2]
+    else:
+        raise ValueError(f"unknown fusion rule {rule!r}")
+    base = maps[0]
+    return Map(base.spec, base.n_obs, base.floor, p * np.maximum(base.n_obs, 1)[:, :, None])
+
+
 def floor_class_ids(scene: Scene) -> np.ndarray:
     return np.array([k for k, name in scene.classes.items() if name in FLOOR_CLASSES])
 

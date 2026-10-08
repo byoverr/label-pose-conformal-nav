@@ -22,7 +22,9 @@ if __name__ == "__main__":
     ap.add_argument("scene_dirs", type=Path, nargs="+")
     ap.add_argument("--levels", type=Path, default=Path("configs/drift_levels.yaml"))
     ap.add_argument("--seeds", type=int, default=10)
-    ap.add_argument("--detections", type=Path, default=Path("data/cache/detections"))
+    ap.add_argument("--detections", type=Path, nargs="+", default=[Path("data/cache/detections")],
+                    help="one or more detection caches; several are fused into one map (--fuse)")
+    ap.add_argument("--fuse", default="max", choices=["max", "mean", "vote2"])
     ap.add_argument("--masks", type=Path, default=None, help="cached instance masks (default: box + depth)")
     ap.add_argument("--out", type=Path, default=Path("results/scores"))
     args = ap.parse_args()
@@ -31,7 +33,7 @@ if __name__ == "__main__":
     args.out.mkdir(parents=True, exist_ok=True)
     for scene_dir in args.scene_dirs:
         out = args.out / f"{scene_dir.name}.csv"
-        det_path = args.detections / f"{scene_dir.name}.npz"
+        det_path = args.detections[0] / f"{scene_dir.name}.npz"
         if out.exists() or not det_path.exists():
             print(f"{scene_dir.name}: {'done' if out.exists() else 'no detections, skipped'}")
             continue
@@ -39,6 +41,9 @@ if __name__ == "__main__":
         scene = load_scene(scene_dir)
         masks = None if args.masks is None else load_masks(args.masks / f"{scene_dir.name}.npz")
         setup = prepare(scene, precompute_observations(scene, load_detections(det_path), masks=masks))
+        setup.extra_obs = [precompute_observations(scene, load_detections(d / f"{scene_dir.name}.npz"), masks=masks)
+                           for d in args.detections[1:]]
+        setup.fuse = args.fuse
         rows = list(scene_rows(setup, levels, args.seeds))
         write_csv(out, rows)
         print(f"{scene.name}: {len(setup.entities)} avoid entities, {len(rows)} rows, {time.time() - t:.0f} s")
