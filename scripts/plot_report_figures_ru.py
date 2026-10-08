@@ -94,9 +94,38 @@ def composition():
     fig.savefig(OUT / "composition_stress.png")
 
 
+def risk_curve():
+    """Certified risk vs share of tasks with a certified path (scripts/analyze_risk.py)."""
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.4), sharey=True)
+    names = {"L0": "точная поза", "L2": "2 см", "L3": "7 см", "L4": "45 см"}
+    for ax, kind, title in zip(axes, ("pb", "rand"), ("трудные задачи", "случайные задачи")):
+        path = Path(f"results/tables/risk_{kind}.csv")
+        if not path.exists():
+            continue
+        rows = read_csv(path)
+        for lv, ls in zip(("L0", "L2", "L3", "L4"), ("-", "--", "-.", ":")):
+            t = [r for r in rows if r["level"] == lv]
+            ax.plot([float(r["target_risk"]) for r in t], [float(r["certified"]) for r in t], ls=ls, color=INK,
+                    marker="o", ms=4, label=names[lv])
+            ax.plot([float(r["target_risk"]) for r in t], [float(r["unsafe_and_certified"]) for r in t], ls=ls,
+                    color=MUTED, lw=1)
+        ax.plot([0, 1], [0, 1], color=MUTED, lw=0.8, ls=":")
+        ax.set_title(title)
+        ax.set_xlabel("допустимый риск a (оба класса)")
+        ax.set_ylim(-0.02, 1.02)
+    axes[0].set_ylabel("доля задач")
+    axes[0].legend(fontsize=7, loc="upper left", title="дрейф", title_fontsize=7)
+    decimal_comma(*axes)
+    for ax in axes:
+        ax.xaxis.set_major_formatter(COMMA)
+    fig.tight_layout()
+    fig.savefig(OUT / "risk_curve.png")
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     setup()
     coverage_headline()
     composition()
+    risk_curve()
     print("saved", sorted(p.name for p in OUT.glob("*.png")))

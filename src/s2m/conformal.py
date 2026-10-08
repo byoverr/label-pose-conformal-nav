@@ -41,6 +41,19 @@ def conformal_quantile(scores, alpha: float) -> float:
     return float(s[k - 1]) if k <= len(s) else math.inf
 
 
+def hierarchical_quantile(groups, alpha: float) -> float:
+    """Hierarchical conformal threshold (Lee, Barber, Willett, arXiv 2306.06342, eq. 6): the (1-alpha)-quantile
+    of the mixture that puts 1/((K+1) N_k) on each of the N_k scores of calibration group k and 1/(K+1) on +inf.
+    Valid for one new observation from a new group; with one score per group it is split conformal."""
+    groups = [np.asarray(g, dtype=float) for g in groups if len(g)]
+    k = len(groups)
+    vals = np.concatenate(groups) if groups else np.zeros(0)
+    w = np.concatenate([np.full(len(g), 1.0 / ((k + 1) * len(g))) for g in groups]) if groups else np.zeros(0)
+    order = np.argsort(vals, kind="stable")
+    idx = int(np.searchsorted(np.cumsum(w[order]), 1 - alpha - 1e-12))
+    return float(vals[order][idx]) if idx < len(vals) else math.inf
+
+
 def coverage_beta_params(n: int, alpha: float) -> tuple[int, int]:
     """Test coverage of split CP (no ties) is Beta(k, n + 1 - k) over calibration draws."""
     k = math.ceil((n + 1) * (1 - alpha))

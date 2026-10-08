@@ -357,7 +357,11 @@ true pose the vocabulary does not matter and the risk level makes the difference
 margin succeeds in 78\,\% of the missions against 43\,\% with either vocabulary. Under drift at $\alpha = 0.05$ the
 closed vocabulary helps the joint margin (0.61 and 0.50 vs.\ 0.46 and 0.34), because the plant abstains less often. Under drift label sets admit unsafe paths (0.4\,\% of the
 missions at 2~cm and 1.1\,\% at 7~cm; a dangerous cell is reachable in 56--60\,\% of realizations), while the joint
-margin has none and succeeds more often: 0.46--0.74 at 2~cm and 0.34--0.68 at 7~cm against 0.39 and 0.31. We repeated
+margin has none and succeeds more often: 0.46--0.74 at 2~cm and 0.34--0.68 at 7~cm against 0.39 and 0.31. Our absolute success is below the 98.36\,\% reported by~\cite{sundarsingh} (whose most-likely-label baseline
+reaches 65.57\,\%), but their method gives 43\,\% on our scenes, so the gap comes from the setting (open sites, a
+1~m grid, exploration) rather than the method; likewise PwC reports 20\,\% collisions and 53.3\,\% goals reached on
+hardware against 66.7 and 33.3\,\% for its baseline~\cite{pwc}, and its geometry-only analogue reaches 43\,\% on our
+random tasks against 78\,\% for the joint margin. We repeated
 both calibrations at the true pose on grids of 5, 25, 50 and 100~cm: the label-set threshold is zero at every resolution
 and its keep-out zone takes 64\,\% of the free space at 5~cm and all of it at 1~m, while in this run ($\alpha = 0.05$, calibration on
 the other 20 scenes) the joint margin abstains for the plant at every resolution and for the bike from 50~cm. A label set can only say ``this cell may be a plant''; a distance says ``a
@@ -380,19 +384,34 @@ from 1.23 to 1.06~m. The plant margin drops from 0.85 to 0.61~m at L0 but grows 
 threshold $\lambda_0 = 0.05$ was set on the development scene; $\lambda_0 = 0.02$ gives slightly smaller margins (bike
 at 45~cm: 1.08 vs.\ 1.23~m), while 0.1 and 0.2 make the plant abstain in 65--100\,\% of the splits.
 
-\textbf{What lowers the price.} The plant's worst miss comes from two small pots in one scene: the detector takes one
-for a wall cabinet and does not see the other. The largest model of the same family, YOLO-World v2-x with the same 98
-text embeddings, finds the plant nearby: its worst miss drops from 3 to 0.71~m, plant abstention from 24--63\,\% to
-0--10\,\% of the splits, the L0 margin from 0.85 to 0.71~m, and certified coverage returns to 0.93; at L0 a path exists
-in 41\,\% of the hard tasks instead of 32\,\%. But the larger model also marks plants and bikes where there are none
-(their regions grow by 32 and 10\,\%), so at 7~cm of drift a path exists in 23\,\% instead of 30\,\%, and it never
-certifies the TV stand. The TV stand is swapped because of competitors in the vocabulary: with the closed five-class
-vocabulary it is certified in every split, but the detector then calls benches and beds TV stands, its region swells,
-and three-class missions find a path in only 5--8\,\% of the hard tasks (6--23\,\% with the open vocabulary): the error
-turns from misses into false positives. A conditional margin would need a feature that predicts the miss; the one a
-robot always has, path length, does not (Spearman $-0.09$ to $0.15$ at L2--L4), and a whole-object miss leaves no trace
-on the map for any feature to see. Weighted conformal prediction~\cite{barber2023} bounds coverage loss on dissimilar
-scenes but needs an estimate of how dissimilar they are, which two HM3D scenes cannot provide.
+\textbf{What lowers the price.} The plant's worst miss comes from two small pots in one scene: the main detector
+takes one for a wall cabinet and does not see the other. YOLO-World v2-x and YOLOE-v8-S~\cite{yoloe}, with the same 98
+prompts, both find the plant: its worst miss drops from 3 to 0.71--0.72~m, plant abstention nearly vanishes and the
+L0 margin drops from 0.85 to 0.71--0.72~m. But each detector has its own whole-object miss. v2-x confuses the TV stand
+even more often and marks plants and bikes where there are none (their regions grow by 32 and 10\,\%), so at 7~cm of
+drift a path exists in 23\,\% of the hard tasks instead of 30\,\%. YOLOE swaps the TV stand in one scene instead of
+three but loses the bike entirely in two, so the bike abstains in 83--85\,\% of the splits and a path exists in only
+7--16\,\% of the hard tasks. The bottleneck moves between classes rather than disappearing. The TV stand is swapped
+because of competitors in the vocabulary: the closed five-class vocabulary certifies it in every split, but the
+detector then calls benches and beds TV stands and three-class missions get no easier (5--8\,\% vs.\ 6--23\,\%);
+merging a class with its usual ``twins'' cannot be done honestly, because on the development scene the TV stand is
+confused with a screen and a monitor, not with the bench, rug and bed of the test scenes. Growing the class region into
+adjacent occupied cells by 15--30~cm barely changes the margin (by at most 0.14~m) while the region grows 2--4 times:
+the worst misses are whole objects, not truncated edges. Hierarchical conformal calibration~\cite{hcp} over all 10
+drift realizations of each calibration scene removes the lottery of drawing one (the spread of the bike margin at
+45~cm falls from 0.49 to 0.18~m) but raises its median (1.24 to 1.50~m), and one margin for both classes covers both
+in 92--94\,\% of the realizations instead of 88--92\,\% at a 0.03--0.26~m larger mean margin. A conditional margin
+would need a feature that predicts the miss; path length does not (Spearman $-0.09$ to $0.15$), and a whole-object
+miss leaves no trace on the map for any feature to see.
+
+\textbf{Risk instead of abstention.} A path with clearance $c_k$ to the region of class $k$ can be unsafe for $k$ only if
+$s_k > c_k$, so $\rho_k = (1 + \#\{i: s_{i,k} \ge \min(c_k, R_{\max})\})/(n + 1)$ over the calibration scores is a conformal
+p-value: $\mathbb P(\text{unsafe and } \rho_k \le a) \le a$ even for a path chosen on the test map. Planning with a grid
+of margins and certifying the first path with $\rho_k \le a/2$ for both classes gives, at $a = 0.2$, a path for
+27--29\,\% of the hard and 70--77\,\% of the random tasks --- the same as the joint margin at $\alpha = 0.1$ --- with at
+most 5.7\,\% of the certified paths unsafe. It does not raise feasibility, but it replaces abstention by an explicit
+risk and explains it: with 20 calibration scenes the smallest risk per class is 1/21, and the scene with the missed
+plant raises it to 2/21.
 
 \subsection{When does the sum of margins under-cover?}\label{sec:composition}
 
@@ -485,6 +504,8 @@ closures, full open-vocabulary mappers and execution-time pose error as next ste
 \bibitem{open3d} Q.-Y.~Zhou, J.~Park, and V.~Koltun, ``Open3D: A modern library for 3D data processing,'' arXiv:1801.09847, 2018.
 \bibitem{steinbrucker} F.~Steinbr\"ucker, J.~Sturm, and D.~Cremers, ``Real-time visual odometry from dense RGB-D images,'' in \emph{Proc. IEEE ICCV Workshops}, 2011, pp. 719--722, doi: 10.1109/ICCVW.2011.6130321.
 \bibitem{mobilesam} C.~Zhang \emph{et al.}, ``Faster segment anything: Towards lightweight SAM for mobile applications,'' arXiv:2306.14289, 2023.
+\bibitem{yoloe} A.~Wang \emph{et al.}, ``YOLOE: Real-time seeing anything,'' in \emph{Proc. IEEE/CVF ICCV}, 2025, pp. 24591--24602, doi: 10.1109/ICCV51701.2025.02280.
+\bibitem{hcp} Y.~Lee, R.~F.~Barber, and R.~Willett, ``Distribution-free inference with hierarchical data,'' \emph{ACM J. Data Sci.}, 2026, doi: 10.1145/3786352.
 \bibitem{hm3d} S.~K.~Ramakrishnan \emph{et al.}, ``Habitat-Matterport 3D dataset (HM3D): 1000 large-scale 3D environments for embodied AI,'' in \emph{NeurIPS Datasets and Benchmarks}, 2021, arXiv:2109.08238.
 \end{thebibliography}
 

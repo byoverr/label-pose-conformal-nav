@@ -5,6 +5,8 @@ Example: python scripts/run_detector.py data/replica_cad/apt_0 --limit 50   # sp
                 --detections data/cache/detections_closed5     # closed 5-class vocabulary (Sundarsingh et al. setting)
          python scripts/run_detector.py data/replica_cad/* --weights models/yolov8x-worldv2.pt \
                 --detections data/cache/detections_x           # the largest YOLO-World v2 model
+         python scripts/run_detector.py data/replica_cad/* --weights models/yoloe-v8s-seg.pt \
+                --detections data/cache/detections_yoloe       # YOLOE-v8-S (boxes only)
 """
 
 import argparse

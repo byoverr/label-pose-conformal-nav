@@ -188,3 +188,47 @@ def _plan_subset(trav, starts, goal_masks, valid, res):
     for i, path in zip(valid, sub):
         out[i] = path
     return out
+
+
+RISK_MARGINS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.25, 1.5, 2.0)
+
+
+def run_risk_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,
+                         margins=RISK_MARGINS, lam: float = 0.05) -> list[dict]:
+    """Plan every task with a grid of uncalibrated margins and record each path's clearance to every
+    avoid-class region (risk is assigned later from calibration scores, see scripts/analyze_risk.py).
+
+    clearance_<class> = min over path cells of dist(cell, region of the class) - SAFETY_DISTANCE (>= margin);
+    inf when the class region is empty.
+    """
+    s, res, shape = setup, setup.spec.res, setup.spec.shape
+    D_q = world_correction(est_poses, s.scene.poses)[-1]
+    truth = build_map(s.obs, D_q[None] @ s.scene.poses, s.spec, s.n_classes, "gt", floor_class_ids(s.scene))
+    moved = [e.cells for e in transform_entities(s.entities, s.spec, D_q)]
+    d_avoid = distance_from(np.concatenate(moved) if moved else np.zeros((0, 2), int), shape, res, R_MAX)
+    d_obst = distance_to(truth.occupied(), res)
+    cells = [(to_cell(s.spec, t.start_xz, D_q), to_cell(s.spec, t.goal_xz, D_q)) for t in tasks]
+    valid = [i for i, (a, b) in enumerate(cells) if a is not None and b is not None]
+    starts = [cells[i][0] if i in valid else None for i in range(len(tasks))]
+    goal_masks = [disk(shape, cells[i][1], GOAL_TOL, res) if i in valid else None for i in range(len(tasks))]
+    d_goal = {i: distance_to(disk(shape, cells[i][1], 0.0, res), res) for i in valid}
+    pred = build_map(s.obs, est_poses, s.spec, s.n_classes, "det")
+    base = pred.free() & ~dilate(pred.occupied(), ROBOT_RADIUS, res)
+    regions = {k: pred.region(k, lam) for k in s.avoid_ids}
+    fields = {k: distance_to(regions[k], res) for k in s.avoid_ids}
+    rows = []
+    for m in margins:
+        keep = np.zeros(shape, bool)
+        for k in s.avoid_ids:
+            keep |= dilate(regions[k], SAFETY_DISTANCE + m, res)
+        paths = _plan_subset(base & ~keep, starts, goal_masks, valid, res)
+        for i in valid:
+            o = evaluate_path(paths[i], d_avoid, d_obst, d_goal[i], res, reach=GOAL_TOL)
+            row = {"task": i, "margin": m, "planned": o.planned, "violation": o.violation,
+                   "collision": o.collision, "length": o.length}
+            for k in s.avoid_ids:
+                name = s.scene.classes[k]
+                row[f"clearance_{name}"] = (float(fields[k][paths[i][:, 0], paths[i][:, 1]].min()) - SAFETY_DISTANCE
+                                            if paths[i] is not None else np.nan)
+            rows.append(row)
+    return rows

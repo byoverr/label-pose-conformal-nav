@@ -15,7 +15,7 @@ PB := --avoid indoor_plant bike
 CLOSED5 := indoor_plant bike tv_stand sofa table
 
 .PHONY: setup data scores coverage missions main comparison alpha composition sam vo hm3d grid \
-        detector robustness tables docs test all
+        detector yoloe regions risk robustness tables docs test all
 
 setup:
 	python3.12 -m venv .venv
@@ -107,7 +107,26 @@ detector:  # the largest YOLO-World v2 model instead of v2-s
 		--out results/missions_rand_x
 	$(PY) scripts/analyze_missions.py --dir results/missions_rand_x --tag _rand_x --no-h4
 
-robustness: alpha composition sam vo hm3d grid detector
+yoloe:  # YOLOE-v8-S instead of YOLO-World v2-s (needs models/mobileclip_blt.ts once to embed the prompts)
+	$(PY) scripts/run_detector.py data/replica_cad/* --weights models/yoloe-v8s-seg.pt --detections data/cache/detections_yoloe
+	$(PY) scripts/compute_scores.py data/replica_cad/* --detections data/cache/detections_yoloe --out results/scores_yoloe
+	$(PY) scripts/analyze_coverage.py --scores results/scores_yoloe --tag _yoloe
+	$(PY) scripts/run_missions.py --scores results/scores_yoloe --detections data/cache/detections_yoloe $(PB) --out results/missions_pb_yoloe
+	$(PY) scripts/analyze_missions.py --dir results/missions_pb_yoloe --tag _pb_yoloe --no-h4
+	$(PY) scripts/run_missions.py --kind random --scores results/scores_yoloe --detections data/cache/detections_yoloe $(PB) \
+		--out results/missions_rand_yoloe
+	$(PY) scripts/analyze_missions.py --dir results/missions_rand_yoloe --tag _rand_yoloe --no-h4
+
+regions:  # class regions grown into adjacent occupied cells
+	$(PY) scripts/extra_scores.py data/replica_cad/*
+	$(PY) scripts/coverage_checks.py --only regions
+
+risk:  # risk as an output instead of abstention
+	$(PY) scripts/run_risk.py --kind pass_by
+	$(PY) scripts/run_risk.py --kind random
+	$(PY) scripts/analyze_risk.py
+
+robustness: alpha composition sam vo hm3d grid detector yoloe regions risk
 	$(PY) scripts/analyze_variants.py
 
 # --- documents ---------------------------------------------------------------------------------

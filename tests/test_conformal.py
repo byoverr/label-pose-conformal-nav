@@ -3,7 +3,7 @@ import math
 import numpy as np
 import pytest
 
-from s2m.conformal import (conformal_quantile, coverage_beta_params, label_score,
+from s2m.conformal import (conformal_quantile, coverage_beta_params, hierarchical_quantile, label_score,
                            miss_distance)
 from s2m.entities import Entity
 from s2m.grid import GridSpec
@@ -64,3 +64,12 @@ def test_footprint_pushed_off_the_grid_is_still_measured():
     m.n_obs[:] = 10
     m.class_mass[:, :, 1] = 10.0
     assert label_score(m, [e]) == 2.0  # no label set can hold a cell the map does not have
+
+
+def test_hierarchical_quantile_reduces_to_split_conformal_and_weights_groups():
+    s = np.arange(1, 14, dtype=float)  # 13 groups of one score
+    assert hierarchical_quantile([[x] for x in s], 0.1) == conformal_quantile(s, 0.1)
+    # one group of 10 scores where 3 are huge: they carry 3/10 of that group's weight, not 3 whole groups
+    groups = [[1.0]] * 12 + [[1.0] * 7 + [100.0] * 3]
+    assert hierarchical_quantile(groups, 0.1) == 1.0
+    assert hierarchical_quantile([[1.0]] * 5, 0.1) == math.inf  # too few groups

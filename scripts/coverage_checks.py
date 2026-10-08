@@ -8,7 +8,13 @@
   both      : coverage of plant and bike at once (what a two-class mission needs);
   layout    : leave-one-layout-out: calibrate on the other layouts, test on one (a mild shift);
   bootstrap : scene-bootstrap 90% intervals for the coverage of every arm (copies of a resampled
-              scene always land on the same side of a split).
+              scene always land on the same side of a split);
+  hcp       : joint arm calibrated with hierarchical conformal prediction over all drift realizations of
+              each calibration scene instead of one random realization;
+  allclass  : one guarantee for plant and bike at once: calibrate max(s_plant, s_bike) and use the same
+              margin for both, instead of per-class margins (union bound 1 - 2 alpha);
+  regions   : joint arm with the class region grown into adjacent occupied cells by 15 or 30 cm
+              (results/scores_extra, scripts/extra_scores.py): margin vs region area.
 
 Writes results/tables/checks_<name>.csv.
 
@@ -23,7 +29,7 @@ import numpy as np
 from scipy.stats import beta
 
 from s2m.analysis import ARMS, LAM0, calibrate_class, covers, load_scores, miss_at, run_splits
-from s2m.conformal import UNCOVERABLE
+from s2m.conformal import UNCOVERABLE, conformal_quantile, hierarchical_quantile
 from s2m.experiment import R_MAX
 from s2m.io import DEV_SCENES, LEVELS, write_csv
 
@@ -180,6 +186,85 @@ if __name__ == "__main__":
                     table.append(t)
                     print(" ".join(f"{k}={v:.3f}" if isinstance(v, float) else f"{k}={v}" for k, v in t.items()))
         write_csv(out / "checks_layout.csv", table)
+
+    if run("hcp") or run("allclass"):
+        rng = np.random.default_rng(0)
+        hcp_table, all_table = [], []
+        for lv in LEVELS:
+            acc = {(c, m): {"coverage": [], "abstain": [], "radius": []} for c in CLASSES for m in ("split", "hcp")}
+            allc = {m: {"both": [], "abstain": [], "radius": []} for m in ("per_class", "max")}
+            for _ in range(args.splits):
+                perm = rng.permutation(scenes)
+                cal_s, test_s = perm[:n_cal], perm[n_cal:]
+                groups = {s: [r for r in by_scene[s] if r["level"] == lv] for s in cal_s}
+                pick = {s: g[rng.integers(len(g))] for s, g in groups.items()}
+                test = [r for s in test_s for r in by_scene[s] if r["level"] == lv]
+                radius = {}
+                for c in CLASSES:
+                    for m in ("split", "hcp"):
+                        if m == "split":
+                            q = conformal_quantile([miss_at(pick[s], c, LAM0) for s in cal_s], args.alpha)
+                        else:
+                            q = hierarchical_quantile([[miss_at(r, c, LAM0) for r in groups[s]] for s in cal_s], args.alpha)
+                        r_ = None if not math.isfinite(q) or q >= R_MAX else q
+                        radius[(c, m)] = r_
+                        a = acc[(c, m)]
+                        a["abstain"].append(float(r_ is None))
+                        a["radius"].append(np.nan if r_ is None else r_)
+                        a["coverage"].append(1.0 if r_ is None else float(np.mean([miss_at(t, c, LAM0) <= r_ + 1e-9 for t in test])))
+                # one margin for both classes
+                q = conformal_quantile([max(miss_at(pick[s], c, LAM0) for c in CLASSES) for s in cal_s], args.alpha)
+                r_max = None if not math.isfinite(q) or q >= R_MAX else q
+                for m, rr in (("per_class", {c: radius[(c, "split")] for c in CLASSES}), ("max", {c: r_max for c in CLASSES})):
+                    ab = any(v is None for v in rr.values())
+                    allc[m]["abstain"].append(float(ab))
+                    allc[m]["radius"].append(np.nan if ab else float(np.mean(list(rr.values()))))
+                    allc[m]["both"].append(1.0 if ab else float(np.mean([all(miss_at(t, c, LAM0) <= rr[c] + 1e-9 for c in CLASSES) for t in test])))
+            for (c, m), a in acc.items():
+                cov, ab, rad = (np.array(a[k], float) for k in ("coverage", "abstain", "radius"))
+                row = {"level": lv, "class": c, "method": m, "coverage": float(cov.mean()),
+                       "coverage_cert": float(cov[ab == 0].mean()) if (ab == 0).any() else np.nan,
+                       "abstain": float(ab.mean()), "radius_median": float(np.nanmedian(rad)) if np.isfinite(rad).any() else np.nan,
+                       "radius_sd": float(np.nanstd(rad)) if np.isfinite(rad).any() else np.nan}
+                hcp_table.append(row)
+                print(" ".join(f"{k}={v:.3f}" if isinstance(v, float) else f"{k}={v}" for k, v in row.items()))
+            for m, a in allc.items():
+                cov, ab, rad = (np.array(a[k], float) for k in ("both", "abstain", "radius"))
+                row = {"level": lv, "method": m, "coverage_both": float(cov.mean()),
+                       "coverage_both_cert": float(cov[ab == 0].mean()) if (ab == 0).any() else np.nan,
+                       "abstain": float(ab.mean()), "radius_mean_median": float(np.nanmedian(rad)) if np.isfinite(rad).any() else np.nan}
+                all_table.append(row)
+                print(" ".join(f"{k}={v:.3f}" if isinstance(v, float) else f"{k}={v}" for k, v in row.items()))
+        write_csv(out / "checks_hcp.csv", hcp_table)
+        write_csv(out / "checks_allclass.csv", all_table)
+
+    if run("regions") and Path("results/scores_extra").exists():
+        ext = {(r["scene"], r["level"], int(r["seed"])): r for r in load_scores(Path("results/scores_extra"), exclude=DEV_SCENES)}
+        rng = np.random.default_rng(0)
+        table = []
+        for lv in ("L0", "L2", "L4"):
+            for c in CLASSES:
+                acc = {v: {"coverage": [], "abstain": [], "radius": []} for v in ("base", "grow15", "grow30")}
+                for _ in range(args.splits):
+                    perm = rng.permutation(scenes)
+                    cal_s, test_s = perm[:n_cal], perm[n_cal:]
+                    pick = {s: (lambda b: b[rng.integers(len(b))])([r for r in by_scene[s] if r["level"] == lv]) for s in cal_s}
+                    test = [r for s in test_s for r in by_scene[s] if r["level"] == lv]
+                    for v, a in acc.items():
+                        val = (lambda r: miss_at(r, c, LAM0)) if v == "base" else \
+                              (lambda r, v=v: ext[(r["scene"], r["level"], int(r["seed"]))][f"miss_{v}_{c}"])
+                        q = conformal_quantile([val(pick[s]) for s in cal_s], args.alpha)
+                        r_ = None if not math.isfinite(q) or q >= R_MAX else q
+                        a["abstain"].append(float(r_ is None))
+                        a["radius"].append(np.nan if r_ is None else r_)
+                        a["coverage"].append(1.0 if r_ is None else float(np.mean([val(x) <= r_ + 1e-9 for x in test])))
+                for v, a in acc.items():
+                    col = f"area_{c}" if v == "base" else f"area_{v}_{c}"
+                    area = float(np.mean([r[col] for k, r in ext.items() if k[1] == lv]))
+                    row = {"level": lv, "class": c, "region": v, **summary(a), "region_cells_mean": area}
+                    table.append(row)
+                    print(" ".join(f"{k}={x:.3f}" if isinstance(x, float) else f"{k}={x}" for k, x in row.items()))
+        write_csv(out / "checks_regions.csv", table)
 
     if run("bootstrap"):
         rng = np.random.default_rng(1)

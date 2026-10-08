@@ -53,7 +53,11 @@ class OpenVocabDetector:
         # set_classes needs CLIP (~340 MB) to embed the prompts. We embed once and save the model
         # with the vocabulary baked in, so later runs need neither CLIP nor the network.
         baked = Path(weights).with_name(Path(weights).stem + f"-vocab{len(vocabulary)}.pt")
-        if baked.exists():
+        if "yoloe" in Path(weights).name:  # YOLOE: its own MobileCLIP text space, no closed subset support
+            if subset is not None:
+                raise ValueError("closed vocabularies are implemented for YOLO-World only")
+            self.model = self._yoloe(Path(weights), baked, list(vocabulary.values()))
+        elif baked.exists():
             self.model = YOLOWorld(str(baked))
         else:
             self.model = YOLOWorld(weights)
@@ -75,6 +79,27 @@ class OpenVocabDetector:
             world.model[-1].nc = len(idx)
             world.names = {i: vocabulary[k] for i, k in enumerate(subset)}
             self.ids = np.array(subset, dtype=np.int32)
+
+    @staticmethod
+    def _yoloe(weights: Path, baked: Path, prompts: list[str]):
+        """YOLOE with the vocabulary baked in; the MobileCLIP text encoder (mobileclip_blt.ts, ~600 MB) is
+        needed once, next to the weights, to embed the prompts."""
+        import os
+
+        from ultralytics import YOLOE
+
+        if baked.exists():
+            return YOLOE(str(baked))
+        model = YOLOE(str(weights))
+        cwd = os.getcwd()
+        os.chdir(weights.parent)  # Ultralytics looks for the text encoder in the working directory
+        try:
+            embeddings = model.get_text_pe(prompts)
+        finally:
+            os.chdir(cwd)
+        model.set_classes(prompts, embeddings)
+        model.save(str(baked))
+        return model
 
     @staticmethod
     def _baked_donor(weights: Path, prompts: list[str]):
