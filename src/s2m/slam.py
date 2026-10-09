@@ -142,7 +142,6 @@ def loop_closure_slam(scene: Scene, vo: VOResult, key_every: int = 5, min_gap: i
             continue
         T = np.linalg.inv(planar_motion(np.linalg.inv(np.asarray(T))))  # planar camera motion, as in the odometry
         ev = reg.evaluate_registration(cloud(a), cloud(b), 0.05, T)
-        correction = np.linalg.norm((P[b] @ T @ np.linalg.inv(P[a]))[[0, 2], 3])  # world-frame shift implied
         if ev.fitness < min_fitness or ev.inlier_rmse > max_rmse:
             continue
         verified += 1

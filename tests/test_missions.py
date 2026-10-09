@@ -105,3 +105,31 @@ def test_fusion_rules_take_max_mean_and_second_largest_fraction():
     for rule, want in (("max", 0.9), ("mean", 1.7 / 3), ("vote2", 0.6)):
         f = fuse_maps(maps, rule)
         assert np.isclose(f.class_mass[0, 0, 1] / f.n_obs[0, 0], want)
+
+
+def test_zero_drift_execution_is_evaluated_like_the_plan():
+    from s2m.conformal import distance_to
+    from s2m.drift import DriftModel
+    from s2m.missions import execution_outcomes, path_poses
+
+    spec = GridSpec(0.0, 0.0, 0.05, (60, 60))
+    obj = np.zeros(spec.shape, bool)
+    obj[30:33, 30:33] = True
+    d_avoid = distance_to(obj, spec.res)
+    free = np.full(spec.shape, 5.0)
+    # a staircase path that passes the object at varying distance (diagonal and straight steps)
+    cells = [[10, 10]]
+    for i in range(40):
+        r, c = cells[-1]
+        cells.append([r + (i % 2 == 0), c + 1])
+    cells = np.array(cells)
+    P = path_poses(cells, spec)
+    r, c, _ = spec.to_cell(P[:, 0, 3], P[:, 2, 3])
+    assert {tuple(x) for x in np.stack([r, c], 1)} <= {tuple(x) for x in cells}  # every pose lies in a path cell
+    plan_unsafe = float(d_avoid[cells[:, 0], cells[:, 1]].min() < 0.5)
+    out = execution_outcomes(cells, spec, d_avoid, free, DriftModel(), np.random.default_rng(0), 2)
+    assert out["exec_unsafe"] == plan_unsafe == 1.0 and out["exec_fail"] == 1.0
+    far = cells.copy()
+    far[:, 0] -= 8  # the same path 40 cm further from the object
+    plan_far = float(d_avoid[far[:, 0], far[:, 1]].min() < 0.5)
+    assert execution_outcomes(far, spec, d_avoid, free, DriftModel(), np.random.default_rng(0), 2)["exec_unsafe"] == plan_far

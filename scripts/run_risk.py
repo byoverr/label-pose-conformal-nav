@@ -51,6 +51,8 @@ if __name__ == "__main__":
     out_dir.mkdir(parents=True, exist_ok=True)
     levels = {lv: m for lv, m in load_levels(args.levels).items() if lv in args.only}
     if args.slam is not None:
+        if args.exec_draws:
+            raise SystemExit("--exec-draws needs a drift model; it cannot be combined with --slam")
         levels = {"SLAM2": None}
     rows = load_scores(args.scores, exclude=DEV_SCENES)
     by = {}
@@ -87,6 +89,6 @@ if __name__ == "__main__":
                     res.append({"scene": name, "level": lv, "seed": seed, **r})
         fields = ["scene", "level", "seed", "task", "margin", "planned", "violation", "collision", "length"] + \
                  [f"clearance_{c}" for c in AVOID] + \
-                 (["exec_unsafe", "exec_collision", "exec_u", "exec_dev"] if args.exec_draws else [])
+                 (["exec_unsafe", "exec_collision", "exec_fail", "exec_u", "exec_dev"] if args.exec_draws else [])
         write_csv(out, res, fields)
         print(f"{name}: {len(tasks)} tasks, {len(res)} rows, {time.time() - t:.0f} s", flush=True)

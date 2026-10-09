@@ -145,6 +145,11 @@ slam:  # loop-closure SLAM over the cached odometry (needs make vo)
 		--only L0 VO2 SLAM2 $(PB) --out results/missions_pb_slam
 	$(PY) scripts/analyze_missions.py --dir results/missions_pb_slam --tag _pb_slam --levels L0 VO2 SLAM2 \
 		--scores results/scores results/scores_vo results/scores_slam --no-h4
+	$(PY) scripts/run_slam.py data/replica_cad/* $(ENS) --fuse max --out results/scores_slam_ens_max
+	$(PY) scripts/run_missions.py --scores results/scores_ens_max results/scores_slam_ens_max --slam 2 --only L0 SLAM2 \
+		$(ENS) --fuse max $(PB) --out results/missions_pb_slam_ens_max
+	$(PY) scripts/analyze_missions.py --dir results/missions_pb_slam_ens_max --tag _pb_slam_ens_max --levels L0 SLAM2 \
+		--scores results/scores_ens_max results/scores_slam_ens_max --no-h4
 
 execution:  # certified paths executed under continued drift
 	$(PY) scripts/run_risk.py --kind pass_by --only L2 L3 L4 --exec-draws 20

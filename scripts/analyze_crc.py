@@ -9,7 +9,9 @@ the monotone envelope L~_i(m) = max_{m' >= m} L_i(m') and n calibration scenes, 
 gives E[L_test] <= a for an exchangeable test scene: the expected fraction of unsafe missions, not the
 probability that a path is unsafe. Only scenes with at least one task take part. With --execution the
 loss is the probability of an unsafe execution under continued drift (results/exec_*), which makes the
-guarantee hold during execution without a separate deviation bound.
+guarantee hold during execution without a separate deviation bound. Success, as in the mission tables, means a
+path that is neither unsafe nor hits an obstacle. The guarantee bounds the scene mean of the loss
+(unsafe_scene_mean); the pooled share over all task realizations (unsafe) weights scenes by their number of tasks.
 
 For comparison the per-path risk rule of scripts/analyze_risk.py (certified if risk_k <= a / 2 for both
 classes) runs on the same rows. Leave-one-scene-out. Writes results/tables/crc_<root>[_execution].csv.
@@ -64,7 +66,10 @@ def analyze(kind: str, execution: bool, root: str):
             for r in rows[(s, lv)]:
                 planned = r["planned"] == "True"
                 unsafe = (float(r[unsafe_key]) if execution else float(r["violation"] == "True")) if planned else 0.0
-                succ = (1.0 - unsafe) if planned else 0.0  # planned paths reach the goal (risk rows keep planned only)
+                # success as in the mission tables: a path that is neither unsafe nor hits an obstacle
+                fail = (float(r["exec_fail"]) if execution else
+                        float(r["violation"] == "True" or r["collision"] == "True")) if planned else 1.0
+                succ = 1.0 - fail
                 tasks[(r["seed"], r["task"])][float(r["margin"])] = (planned, unsafe, succ, r)
             per[s] = tasks
         loss = {s: np.array([np.mean([per[s][t][m][1] for t in per[s]]) for m in margins]) for s in scenes}

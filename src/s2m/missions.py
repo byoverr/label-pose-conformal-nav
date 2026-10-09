@@ -193,36 +193,19 @@ def _plan_subset(trav, starts, goal_masks, valid, res):
 RISK_MARGINS = (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.25, 1.5, 2.0)
 
 
-def _simplify(pts: np.ndarray, tol: float) -> np.ndarray:
-    """Ramer-Douglas-Peucker: indices of waypoints such that the polyline stays within `tol` of `pts`."""
-    keep, stack = {0, len(pts) - 1}, [(0, len(pts) - 1)]
-    while stack:
-        a, b = stack.pop()
-        if b <= a + 1:
-            continue
-        seg = pts[b] - pts[a]
-        rel = pts[a + 1:b] - pts[a]
-        n = np.linalg.norm(seg)
-        d = np.abs(seg[0] * rel[:, 1] - seg[1] * rel[:, 0]) / n if n > 0 else np.linalg.norm(rel, axis=1)
-        k = int(np.argmax(d))
-        if d[k] > tol:
-            keep.add(a + 1 + k)
-            stack += [(a, a + 1 + k), (a + 1 + k, b)]
-    return np.array(sorted(keep))
-
-
 EXEC_STEP, EXEC_TURN = 0.03, np.radians(2.0)  # motion primitives of the mapping trajectories (drift levels are per step)
 
 
 def path_poses(cells: np.ndarray, spec, height: float = 1.5) -> np.ndarray:
-    """Level camera poses (camera-to-world, camera y = world -y) of a robot that follows a grid path:
-    the path is simplified to waypoints within one cell of it, and the robot turns in place and drives
-    straight between waypoints with the motion primitives of the mapping trajectories (3 cm, 2 deg)."""
+    """Level camera poses (camera-to-world, camera y = world -y) of a robot that follows a grid path cell by
+    cell: it turns in place and drives straight between adjacent cell centres with the motion primitives of
+    the mapping trajectories (3 cm, 2 deg). Without drift every pose lies in a path cell, so a zero-drift
+    execution is evaluated exactly like the plan."""
     from s2m.drift import rot_y
 
     xs, zs = spec.cell_centers()
     pts = np.stack([xs[cells[:, 1]], zs[cells[:, 0]]], 1)
-    way = pts[_simplify(pts, spec.res)] if len(pts) > 1 else pts
+    way = pts
 
     def pose(xz, yaw):
         T = np.eye(4)
@@ -248,28 +231,29 @@ def path_poses(cells: np.ndarray, spec, height: float = 1.5) -> np.ndarray:
 
 def execution_outcomes(cells: np.ndarray, spec, d_avoid: np.ndarray, d_obst: np.ndarray, model,
                        rng: np.random.Generator, draws: int) -> dict:
-    """Simulated executions of a planned path under continued drift. exec_unsafe / exec_collision: fraction
-    of draws that come closer than the safety distance to an avoid-class object / hit an obstacle;
-    exec_u: the largest deviation from the commanded position divided by the path length, first draw
-    (the score an execution log would give); exec_dev: mean over draws of the largest deviation."""
+    """Simulated executions of a planned path under continued drift. exec_unsafe / exec_collision / exec_fail:
+    fraction of draws that come closer than the safety distance to an avoid-class object / hit an obstacle /
+    do either; exec_u: the largest deviation from the commanded position divided by the path length, first
+    draw (the score an execution log would give); exec_dev: mean over draws of the largest deviation."""
     from s2m.drift import path_length, simulate
 
     P = path_poses(cells, spec)
     if len(P) < 2:
-        return {"exec_unsafe": 0.0, "exec_collision": 0.0, "exec_u": 0.0, "exec_dev": 0.0}
+        return {"exec_unsafe": 0.0, "exec_collision": 0.0, "exec_fail": 0.0, "exec_u": 0.0, "exec_dev": 0.0}
     cmd = P[:, [0, 2], 3]
     length = max(path_length(P), 1e-9)
-    unsafe = coll = 0
+    unsafe = coll = fail = 0
     devs = []
     for _ in range(draws):
         q = simulate(P, model, rng)[:, [0, 2], 3]
         r, c, inside = spec.to_cell(q[:, 0], q[:, 1])
         r, c = np.clip(r, 0, spec.shape[0] - 1), np.clip(c, 0, spec.shape[1] - 1)
-        unsafe += bool(np.where(inside, d_avoid[r, c], np.inf).min() < SAFETY_DISTANCE)  # off the map: outside
-        coll += bool(np.where(inside, d_obst[r, c], 0.0).min() < ROBOT_RADIUS - spec.res)
+        u = bool(np.where(inside, d_avoid[r, c], np.inf).min() < SAFETY_DISTANCE)  # off the map: no avoid object
+        k = bool(np.where(inside, d_obst[r, c], 0.0).min() < ROBOT_RADIUS - spec.res)  # off the map: a wall
+        unsafe, coll, fail = unsafe + u, coll + k, fail + (u or k)
         devs.append(float(np.linalg.norm(q - cmd, axis=1).max()))
-    return {"exec_unsafe": unsafe / draws, "exec_collision": coll / draws, "exec_u": devs[0] / length,
-            "exec_dev": float(np.mean(devs))}
+    return {"exec_unsafe": unsafe / draws, "exec_collision": coll / draws, "exec_fail": fail / draws,
+            "exec_u": devs[0] / length, "exec_dev": float(np.mean(devs))}
 
 
 def run_risk_realization(setup: SceneSetup, tasks: list[Task], est_poses: np.ndarray,

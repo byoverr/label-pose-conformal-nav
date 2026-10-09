@@ -1,1 +1,1 @@
-scene,level,seed,task,margin,planned,violation,collision,length,clearance_indoor_plant,clearance_bike,exec_unsafe,exec_collision,exec_u,exec_dev
+scene,level,seed,task,margin,planned,violation,collision,length,clearance_indoor_plant,clearance_bike,exec_unsafe,exec_collision,exec_fail,exec_u,exec_dev

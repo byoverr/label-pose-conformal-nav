@@ -159,13 +159,12 @@ def cascade(detector_sets: list[dict[int, Detections]], verified: dict, prompt_i
                 k = int(prompt_ids[j])
                 if k >= 0 and k not in proposed and probs[cj, j] >= tau_relabel:
                     # the box of the cluster's most confident detection, with that detection's score
+                    best = None
                     for (c, kk, s), det in zip(cids, [d.get(f, Detections.empty()) for d in detector_sets]):
-                        hit = np.flatnonzero(c == cj)
-                        if len(hit):
-                            b = hit[np.argmax(s[hit])]
-                            boxes.append(det.boxes[b:b + 1]); cls.append(np.array([k], np.int32))
-                            sc.append(np.array([smax], np.float32))
-                            break
+                        for b in np.flatnonzero(c == cj):
+                            if best is None or s[b] > best[0]:
+                                best = (s[b], det.boxes[b:b + 1])
+                    boxes.append(best[1]); cls.append(np.array([k], np.int32)); sc.append(np.array([smax], np.float32))
         out[f] = Detections(np.concatenate(boxes).astype(np.float32).reshape(-1, 4),
                             np.concatenate(cls).astype(np.int32), np.concatenate(sc).astype(np.float32))
     return out

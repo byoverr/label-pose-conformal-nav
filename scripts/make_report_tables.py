@@ -151,7 +151,7 @@ def comparison_table():
     rows = read_csv(path)
     arms = ("label_cell", "geometry", "joint", "uncalibrated", "oracle")
     lines = ["\\begin{tabular}{llc|ccccc}", "\\toprule",
-             "Словарь & $1 - \\alpha$ & Дрейф & " + " & ".join(ARM_RU[a] for a in arms) + " \\\\", "\\midrule"]
+             "Словарь & $1 - \\alpha$ & Поза & " + " & ".join(ARM_RU[a] for a in arms) + " \\\\", "\\midrule"]
     settings = [("closed", "0.05"), ("closed", "0.1"), ("open", "0.05"), ("open", "0.1")]
     for s, (vocab, alpha) in enumerate(settings):
         for i, lv in enumerate(("L0", "L2", "L3")):
@@ -164,7 +164,7 @@ def comparison_table():
                     c += "$^\\ast$"
                 cells.append(c)
             head = ["закрытый" if vocab == "closed" else "открытый", fmt(1 - float(alpha))] if i == 0 else ["", ""]
-            lines.append(" & ".join(head + ["известна" if lv == "L0" else lv] + cells) + " \\\\")
+            lines.append(" & ".join(head + ["точная" if lv == "L0" else lv] + cells) + " \\\\")
         lines.append("\\midrule" if s < len(settings) - 1 else "\\bottomrule")
     lines.append("\\end{tabular}")
     (OUT / "comparison.tex").write_text("\n".join(lines) + "\n")
@@ -174,7 +174,7 @@ def detector_table():
     """Detectors (YOLO-World v2-s main, v2-x, YOLOE-v8-S): joint margin and abstention per class, missions."""
     tags = [(tag, name) for tag, name in (("", "YOLO-World v2-s"), ("_x", "YOLO-World v2-x"), ("_yoloe", "YOLOE-v8-S"),
                                          ("_ens_max", "ансамбль, максимум"), ("_ens_mean", "ансамбль, среднее"),
-                                         ("_ens_vote2", "ансамбль, второе"), ("_cascade", "каскад с CLIP"))
+                                         ("_ens_vote2", "ансамбль, согласие двух"), ("_cascade", "каскад с CLIP"))
             if Path(f"results/tables/coverage{tag}.csv").exists()]
     if len(tags) < 2:
         return
@@ -197,35 +197,59 @@ def detector_table():
     lines += ["\\bottomrule", "\\end{tabular}"]
     (OUT / "detector.tex").write_text("\n".join(lines) + "\n")
 
+def scene_unsafe(directory: str, arm: str, level: str) -> tuple[float, float]:
+    """Mean over scenes and worst scene of the share of unsafe missions (violations among all task realizations)."""
+    shares = []
+    for f in sorted(Path(directory).glob("*.csv")):
+        if f.stem.startswith("params_"):
+            continue
+        rows = [r for r in read_csv(f) if r["arm"] == arm and r["level"] == level]
+        if rows:
+            shares.append(sum(r["violation"] == "True" for r in rows) / len(rows))
+    return (sum(shares) / len(shares), max(shares)) if shares else (float("nan"), float("nan"))
+
+
 def crc_table():
     """Guarantees of different strength on the same tasks: map-level joint margin, per-path risk, planner-level
-    conformal risk control (plan and execution). Success and unsafe share of all task realizations."""
+    conformal risk control (plan and execution). Success: share of task realizations with a path that is neither
+    unsafe nor hits an obstacle. Unsafe: share of unsafe missions per scene, mean over scenes and worst scene, the
+    largest over the levels shown (the mission-level guarantee bounds the mean)."""
     if not Path("results/tables/crc_risk.csv").exists():
         return
-    crc = read_csv("results/tables/crc_risk.csv")
-    exe = read_csv("results/tables/crc_exec_execution.csv") if Path("results/tables/crc_exec_execution.csv").exists() else []
-    ens = read_csv("results/tables/crc_risk_ens.csv") if Path("results/tables/crc_risk_ens.csv").exists() else []
+    src = {name: read_csv(f"results/tables/{name}.csv") for name in ("crc_risk", "crc_exec_execution", "crc_risk_ens")
+           if Path(f"results/tables/{name}.csv").exists()}
     mis = {k: read_csv(f"results/tables/missions_{k}.csv") for k in ("rand", "pb")}
     levels = ("L0", "L2", "L3")
     get = lambda rows, **kw: next((r for r in rows if all(str(r[k]) == str(v) for k, v in kw.items())), None)
-    specs = [("без калибровки", "---", lambda kind, lv: get(mis[kind], level=lv, arm="uncalibrated"), "violation"),
-             ("совместный запас", "$\\alpha = 0{,}1$ на класс", lambda kind, lv: get(mis[kind], level=lv, arm="joint"), "violation"),
-             ("риск пути", "$a = 0{,}2$", lambda kind, lv: get(crc, tasks=kind, level=lv, target="0.2", rule="path"), "unsafe"),
-             ("риск планировщика", "$a = 0{,}05$", lambda kind, lv: get(crc, tasks=kind, level=lv, target="0.05", rule="crc"), "unsafe"),
-             ("риск планировщика", "$a = 0{,}1$", lambda kind, lv: get(crc, tasks=kind, level=lv, target="0.1", rule="crc"), "unsafe"),
-             ("то же, по исполнению", "$a = 0{,}1$", lambda kind, lv: get(exe, tasks=kind, level=lv, target="0.1", rule="crc"), "unsafe"),
-             ("риск планировщика, ансамбль", "$a = 0{,}05$", lambda kind, lv: get(ens, tasks=kind, level=lv, target="0.05", rule="crc"), "unsafe"),
-             ("риск планировщика, ансамбль", "$a = 0{,}1$", lambda kind, lv: get(ens, tasks=kind, level=lv, target="0.1", rule="crc"), "unsafe")]
+
+    def mission_rows(arm):
+        return lambda kind, lv: get(mis[kind], level=lv, arm=arm), \
+               lambda kind, lv: scene_unsafe(f"results/missions_{kind}", arm, lv)
+
+    def crc_rows(name, target, rule):
+        row = lambda kind, lv: get(src.get(name, []), tasks=kind, level=lv, target=target, rule=rule)
+        return row, lambda kind, lv: ((float(row(kind, lv)["unsafe_scene_mean"]), float(row(kind, lv)["unsafe_scene_max"]))
+                                      if row(kind, lv) else (float("nan"), float("nan")))
+
+    specs = [("без калибровки", "---", *mission_rows("uncalibrated")),
+             ("совместный запас", "$\\alpha = 0{,}1$ на класс", *mission_rows("joint")),
+             ("риск пути", "$a = 0{,}2$", *crc_rows("crc_risk", "0.2", "path")),
+             ("риск планировщика", "$a = 0{,}05$", *crc_rows("crc_risk", "0.05", "crc")),
+             ("риск планировщика", "$a = 0{,}1$", *crc_rows("crc_risk", "0.1", "crc")),
+             ("то же, по исполнению", "$a = 0{,}05$", *crc_rows("crc_exec_execution", "0.05", "crc")),
+             ("то же, по исполнению", "$a = 0{,}1$", *crc_rows("crc_exec_execution", "0.1", "crc")),
+             ("риск планировщика, ансамбль", "$a = 0{,}05$", *crc_rows("crc_risk_ens", "0.05", "crc")),
+             ("риск планировщика, ансамбль", "$a = 0{,}1$", *crc_rows("crc_risk_ens", "0.1", "crc"))]
     lines = ["\\begin{tabular}{ll|ccc|c|ccc|c}", "\\toprule",
              "Правило & Уровень & \\multicolumn{4}{c|}{случайные задачи} & \\multicolumn{4}{c}{трудные задачи} \\\\",
              " & & L0 & L2 & L3 & опасн. & L0 & L2 & L3 & опасн. \\\\", "\\midrule"]
-    for name, level, src, unsafe_key in specs:
+    for name, level, row, unsafe in specs:
         cells = []
         for kind in ("rand", "pb"):
-            rows = [src(kind, lv) for lv in levels]
+            rows = [row(kind, lv) for lv in levels]
             cells += [fmt(r["success"]) if r else "---" for r in rows]
-            u = [float(r[unsafe_key]) for r in rows if r]
-            cells.append(fmt(max(u), 3) if u else "---")
+            u = [unsafe(kind, lv) for lv, r in zip(levels, rows) if r]
+            cells.append(f"{fmt(max(x[0] for x in u), 3)} / {fmt(max(x[1] for x in u))}" if u else "---")
         lines.append(f"{name} & {level} & " + " & ".join(cells) + " \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
     (OUT / "crc.tex").write_text("\n".join(lines) + "\n")
@@ -238,7 +262,7 @@ def execution_table():
         return
     rows = read_csv(path)
     lines = ["\\begin{tabular}{l|cc|ccc|ccc}", "\\toprule",
-             "Дрейф & \\multicolumn{2}{c|}{отклонение, \\% пути} & \\multicolumn{3}{c|}{сертификат по плану} & "
+             "Дрейф & \\multicolumn{2}{c|}{отклонение, \\% пути} & \\multicolumn{3}{c|}{гарантия по плану} & "
              "\\multicolumn{3}{c}{с запасом на исполнение} \\\\",
              " & медиана & 95\\,\\% & путь & опасн. & столкн. & путь & опасн. & столкн. \\\\", "\\midrule"]
     import numpy as np
