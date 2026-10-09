@@ -434,7 +434,9 @@ risk and explains it: with 20 calibration scenes the smallest risk per class is 
 plant raises it to 2/21.
 
 \textbf{Calibrating missions instead of the map.} The joint margin promises that every object of the class lies within
-it, including objects no path goes near. Conformal risk control~\cite{crc} calibrates what the robot does instead: for a
+it, including objects no path goes near. Conformal risk control~\cite{crc}, already used in planning for control-barrier
+margins around humans~\cite{gonzales} and in MPC with spectral risk~\cite{eom} (and close to calibrating the clearance of
+the chosen trajectory~\cite{chang}), calibrates what the robot does instead: for a
 margin $m$ on the grid, the loss $L_i(m)$ of scene $i$ is the fraction of its tasks whose path at margin $m$ is unsafe,
 made monotone by $\tilde L_i(m) = \max_{m' \ge m} L_i(m')$, and the smallest $m$ with
 $\frac{1}{n+1}\sum_i \tilde L_i(m) + \frac{1}{n+1} \le a$ gives $\mathbb E[L_{\text{test}}] \le a$. This is a weaker,
@@ -561,6 +563,9 @@ open-vocabulary mappers are the next steps.
 \bibitem{clip} A.~Radford \emph{et al.}, ``Learning transferable visual models from natural language supervision,'' in \emph{Proc. ICML}, PMLR vol. 139, 2021, pp. 8748--8763, arXiv:2103.00020.
 \bibitem{hcp} Y.~Lee, R.~F.~Barber, and R.~Willett, ``Distribution-free inference with hierarchical data,'' \emph{ACM J. Data Sci.}, 2026, doi: 10.1145/3786352.
 \bibitem{crc} A.~N.~Angelopoulos, S.~Bates, A.~Fisch, L.~Lei, and T.~Schuster, ``Conformal risk control,'' in \emph{Proc. ICLR}, 2024, arXiv:2208.02814.
+\bibitem{gonzales} J.~Gonzales, K.~Mizuta, K.~Leung, and L.~J.~Ratliff, ``Safe probabilistic planning for human-robot interaction using conformal risk control,'' in \emph{Proc. IEEE/RSJ IROS}, 2025, pp. 18676--18683, doi: 10.1109/IROS60139.2025.11247339.
+\bibitem{eom} J.~Eom and T.~Ersal, ``Distribution-free risk-aware planning and control under uncertainty using conformal spectral risk control,'' arXiv:2606.04185, 2026.
+\bibitem{chang} P.~Y.~Chang and Q.~Ahmed, ``Barrier function conformal safety clearance certification with CVaR for driving trajectory selection,'' arXiv:2608.26533, 2026.
 \bibitem{choi2015} S.~Choi, Q.-Y.~Zhou, and V.~Koltun, ``Robust reconstruction of indoor scenes,'' in \emph{Proc. IEEE CVPR}, 2015, pp. 5556--5565, doi: 10.1109/CVPR.2015.7299195.
 \bibitem{hm3d} S.~K.~Ramakrishnan \emph{et al.}, ``Habitat-Matterport 3D dataset (HM3D): 1000 large-scale 3D environments for embodied AI,'' in \emph{NeurIPS Datasets and Benchmarks}, 2021, arXiv:2109.08238.
 \end{thebibliography}

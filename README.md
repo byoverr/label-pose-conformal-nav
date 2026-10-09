@@ -76,6 +76,8 @@
    миссий при точной позе / 2 / 7 см — почти как без калибровки (93 / 88 / 80 %), но опасных не больше 0,6 % вместо 7–8 %.
    Гарантия слабее: отдельная сцена может быть опасной целиком (в худшей — 13 %). Вместе с ансамблем детекторов это
    лучшее сочетание на трудных задачах: при доле 0,1 путь в 41 / 83 / 54 % задач (было 32 / 31 / 30 %), опасных ≤ 2,2 %.
+   Сам контроль конформного риска в планировании уже применяли (Gonzales и др., IROS 2025; Eom, Ersal, 2026), но не к
+   семантическим картам с ошибкой позы.
 7. **Исполнение.** Если робот едет по плану, а его оценка позы продолжает дрейфовать, то при 2–7 см отклонение — 0,3–0,8 %
    пройденного пути, и пути, сертифицированные по плану, остаются безопасными (опасных исполнений ≤ 0,6 %). При 45 см
    18 % сертифицированных путей задевают препятствия, а калиброванный запас на исполнение (≈ 17 см на метр пути) делает
@@ -243,3 +245,6 @@ MobileSAM через Ultralytics, одометрия и SLAM — Open3D, про�
 26. Angelopoulos, Bates, Fisch, Lei, Schuster. *Conformal Risk Control.* ICLR 2024. arXiv:2208.02814
 27. Radford et al. *Learning Transferable Visual Models From Natural Language Supervision.* ICML 2021. arXiv:2103.00020
 28. Choi, Zhou, Koltun. *Robust Reconstruction of Indoor Scenes.* CVPR 2015. DOI 10.1109/CVPR.2015.7299195
+29. Gonzales, Mizuta, Leung, Ratliff. *Safe Probabilistic Planning for Human-Robot Interaction using Conformal Risk Control.* IROS 2025. DOI 10.1109/IROS60139.2025.11247339
+30. Eom, Ersal. *Distribution-Free Risk-Aware Planning and Control Under Uncertainty Using Conformal Spectral Risk Control.* arXiv:2606.04185
+31. Chang, Ahmed. *Barrier Function Conformal Safety Clearance Certification with CVaR for Driving Trajectory Selection.* arXiv:2608.26533
