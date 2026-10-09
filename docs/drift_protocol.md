@@ -1,52 +1,53 @@
-# Pose-drift protocol
+# Протокол дрейфа позы
 
-OSMa-Bench publishes ground-truth poses only, so pose error is injected synthetically.
-The model and its parameters are fixed before any calibration result is seen.
+В OSMa-Bench есть только истинные позы камеры, поэтому ошибку позы мы добавляем сами. Здесь описано, как именно, и
+почему уровни дрейфа такие. Модель и её параметры зафиксированы до того, как мы увидели хоть один результат калибровки.
 
-## Model (`src/s2m/drift.py`)
+## Модель (`src/s2m/drift.py`)
 
-Dead reckoning with noise proportional to motion, as in odometry motion models
-(e.g. AMCL's `alpha` parameters):
+Счисление пути с шумом, пропорциональным движению, как в моделях одометрии (например, параметры `alpha` в AMCL).
+Оценённая поза собирается из истинных относительных движений, к каждому из которых добавлен шум:
 
 ```
-T_hat_k = T_hat_{k-1} · Δ_k · N_k,    Δ_k = T_{k-1}^{-1} T_k,    T_hat_0 = T_0
+T̂_k = T̂_{k-1} · Δ_k · N_k,   Δ_k = T_{k-1}⁻¹ T_k,   T̂_0 = T_0
 N_k = Rot_y(δψ) · Trans(δx, 0, δz)
 δx, δz ~ N(0, (σ_t · |Δt_k|)²)
 δψ     ~ N(0, (σ_ψr · |Δψ_k| + σ_ψt · |Δt_k|)²)
 ```
 
-ReplicaCAD cameras are level (camera y axis = world −y, checked for every frame), so the noise is
-applied in the camera frame and the error stays planar: x, z and yaw; height, roll and pitch are exact.
+Здесь `Δt_k` — смещение за шаг, `Δψ_k` — поворот за шаг. Камеры ReplicaCAD стоят ровно (ось y камеры смотрит вниз по
+вертикали мира; это проверяется для каждого кадра), поэтому шум добавляется в системе камеры и ошибка остаётся плоской:
+сдвиг по полу и курс. Высота, крен и тангаж точные — наземный робот знает их по IMU и высоте камеры.
 
-The drifted map places a point seen at frame k at `D_k p` with `D_k = T_hat_k T_k^{-1}`; the planner
-works in the drifted frame at the query time q (last frame), where the true point is at `D_q p`.
+Точка, увиденная в кадре k, попадает на карту в `D_k p`, где `D_k = T̂_k T_k⁻¹`. Планировщик работает в системе
+координат последнего кадра q (момент запроса), и истинная точка там находится в `D_q p`. Поэтому важна не абсолютная
+ошибка, а относительная: насколько поза в момент съёмки объекта ошибалась иначе, чем в момент запроса.
 
-## Levels (`configs/drift_levels.yaml`)
+## Уровни (`configs/drift_levels.yaml`)
 
-The noise *shape* is fixed (σ_t : σ_ψr : σ_ψt = 0.05 : 0.05 : 0.01); one multiplier per level is
-calibrated once on the dev scene `apt_0` (path 33.7 m, 32 seeds) and then applied unchanged to every
-scene, because it describes the pose estimator, not the scene.
+Форма шума одна для всех уровней (σ_t : σ_ψr : σ_ψt = 0,05 : 0,05 : 0,01); для каждого уровня подобран один множитель.
+Подбор сделан один раз на отладочной сцене `apt_0` (путь 33,7 м, 32 случайных зерна), и дальше множитель применяется ко
+всем сценам без изменений: он описывает оценщик позы, а не сцену.
 
-| Level | Target | On apt_0 (mean of 32 seeds) | On the 21 evaluation scenes (median ATE) | What it imitates |
-|---|---|---|---|---|
-| L0 | 0 | 0 | 0 | ground-truth poses |
-| L1 | ATE ≈ 0.7 cm | 0.7 cm | 0.4 cm | dense RGB-D SLAM on synthetic scenes (Replica ATE 0.4–1 cm) |
-| L2 | ATE ≈ 3.5 cm | 3.6 cm | 2.2 cm | real RGB-D SLAM (TUM ATE ≈ 2–5 cm) |
-| L3 | ATE ≈ 11 cm | 11 cm | 6.7 cm | hard scenes (ScanNet ATE ≈ 10–12 cm) |
-| L4 | end drift ≈ 3 % of path | 3.2 % (ATE 75 cm) | 45 cm (3.6 % of path) | odometry without loop closure |
-| L5 | end drift ≈ 17 % of path | 18 % (ATE 4.3 m) | 2.7 m (21 % of path) | stress test (stereo VIO without loop closure) |
+| Уровень | Цель | На `apt_0` (среднее по 32 зёрнам) | На 21 тестовой сцене (медианная ATE) | Что имитирует | Ориентир из литературы |
+|---|---|---|---|---|---|
+| L0 | 0 | 0 | 0 | истинные позы | — |
+| L1 | ATE ≈ 0,7 см | 0,7 см | 0,4 см | плотный RGB-D SLAM на синтетике | Replica: SplaTAM 0,36, Point-SLAM 0,52, NICE-SLAM 1,06 см (SplaTAM, табл. 1) |
+| L2 | ATE ≈ 3,5 см | 3,6 см | 2,2 см | реальный RGB-D SLAM | TUM RGB-D: ORB-SLAM2 1,98, SplaTAM 5,48 см (там же) |
+| L3 | ATE ≈ 11 см | 11 см | 6,7 см | трудные сцены | ScanNet: NICE-SLAM 10,70, SplaTAM 11,88 см (там же) |
+| L4 | дрейф в конце ≈ 3 % пути | 3,2 % (ATE 75 см) | 45 см (3,6 % пути) | одометрия без замыканий циклов | обучаемая визуальная одометрия в Habitat: 1,5–2,7 см и 0,5–1,0 срад за шаг 0,25 м (arXiv 2206.00997, табл. 4); перевод в проценты пути — наша оценка |
+| L5 | дрейф в конце ≈ 17 % пути | 18 % (ATE 4,3 м) | 2,7 м (21 % пути) | стресс-тест | стерео-VIO ZED: 20 % на петле 99 м (arXiv 2609.15475, разд. IV-B); одометрия Unitree Go2: до 18 % (arXiv 2608.20467, разд. V) |
 
-The evaluation scenes have shorter trajectories than the dev scene, so the same per-metre noise gives
-a smaller ATE there. Figures and tables label each level with the median ATE over the evaluation
-scenes (`s2m.io.level_labels`). An earlier version of this table listed 0.6 / 3.0 / 9.5 cm / 63 cm /
-3.5 m as "achieved"; those numbers did not match the configured levels and were corrected on 2026-10-03.
+Траектории тестовых сцен короче, чем у `apt_0`, поэтому тот же шум на метр даёт на них меньшую ATE. На рисунках и в
+таблицах уровни подписаны медианной ATE по тестовым сценам (`s2m.io.level_labels`).
 
-Reference magnitudes come from the literature survey in the companion report (SplaTAM Table 1 for
-Replica/TUM/ScanNet ATE; ZED VIO and quadruped odometry drift for L4–L5).
+SplaTAM: Keetha и др., CVPR 2024, DOI 10.1109/CVPR52733.2024.02018 (arXiv 2312.02126).
 
-## Not modelled (limitations)
+## Чего модель не учитывает
 
-- loop closures and re-anchoring of map objects;
-- correlation between pose error and scene appearance (e.g. more drift in texture-poor areas);
-- execution-time localization error while following the plan (the guarantee is in the planner frame
-  at query time).
+- **Замыкания циклов** и перепривязку объектов карты. Реальную локализацию мы проверили отдельно: RGB-D-одометрией
+  (`scripts/run_vo.py`) и SLAM с замыканиями (`src/s2m/slam.py`).
+- **Связь ошибки позы с видом сцены** (например, больше дрейфа на бедных текстурой участках). У реальной одометрии
+  она есть: ошибки идут скачками на поворотах у стен.
+- **Ошибку позы во время движения по плану.** Основная гарантия относится к плану в момент запроса; исполнение с
+  продолжающимся дрейфом проверено отдельно (`execution_outcomes` в `src/s2m/missions.py`, `make execution`).

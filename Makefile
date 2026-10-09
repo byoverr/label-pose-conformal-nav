@@ -189,6 +189,7 @@ tables:
 
 docs: tables
 	cd report && tectonic report.tex
+	cd paper && tectonic paper_ru.tex
 	cd paper && tectonic paper.tex
 
 test:

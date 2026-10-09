@@ -1,8 +1,9 @@
 <h1 align="center">Конформная калибровка открытословарных семантических карт<br>при ошибках метки и позы</h1>
 <p align="center"><i>Conformal Calibration of Open-Vocabulary Semantic Maps under Label and Pose Uncertainty</i></p>
 <p align="center">
-  <a href="report/report.pdf">Отчёт (PDF, 17 с.)</a> ·
-  <a href="paper/paper.pdf">Статья на английском (PDF, 7 с. и литература)</a> ·
+  <a href="paper/paper_ru.pdf"><b>Статья (PDF, 7 с.)</b></a> ·
+  <a href="report/report.pdf">Подробный отчёт (PDF, 17 с.)</a> ·
+  <a href="paper/paper.pdf">English version (PDF)</a> ·
   <a href="#воспроизведение">Воспроизведение</a>
 </p>
 
@@ -144,7 +145,7 @@ s_k = min( R_max,  max по клеткам x истинных объектов �
 Если сцены обменяемы, то с вероятностью не меньше `1 − α` либо класс отказался, либо истинный объект лежит в пределах
 запаса от области, и любой путь, держащийся дальше `d + запас` от области, по неравенству треугольника держится дальше `d`
 от объекта. Гарантия поклассовая, относится к плану в момент запроса и к центрам клеток (дискретизация съедает до 7 см).
-Доказательства и сравниваемые варианты — в [отчёте](report/report.pdf), разд. 3–4.
+Доказательства и сравниваемые варианты — в [статье](paper/paper_ru.pdf), разд. III–IV.
 
 **Установка.** Данные — 22 сцены ReplicaCAD из [OSMa-Bench](https://huggingface.co/datasets/warmhammer/OSMa-Bench_dataset),
 каждый 8-й кадр; все решения приняты на сцене `apt_0`, остальные 21 — для калибровки и теста. Детектор YOLO-World v2-s с 98
@@ -164,7 +165,7 @@ make main           # загрузка данных, детекции, пром�
 make comparison     # сравнение с множествами меток по схеме 2×2
 make robustness     # уровень риска, стресс-тест, MobileSAM, одометрия, HM3D, шаг сетки, детекторы,
                     # ансамбль, SLAM, исполнение (каскад: run_verifier, select_cascade, make_cascade)
-make docs           # таблицы, report/report.pdf и paper/paper.pdf (нужен tectonic)
+make docs           # таблицы, статья paper/paper_ru.pdf, отчёт и английская версия (нужен tectonic)
 make test           # модульные тесты
 ```
 
@@ -191,8 +192,10 @@ src/s2m/
   io.py          работа с CSV, подписи уровней дрейфа
 scripts/         по скрипту на шаг (run_*, compute_*, analyze_*, plot_*)
 configs/         уровни дрейфа, список сцен, сопоставление классов HM3D
-results/         промахи, исходы миссий, таблицы, рисунки
-report/ paper/   исходники LaTeX и PDF
+results/         промахи, исходы миссий, таблицы, рисунки (путеводитель — results/README.md)
+paper/           статья: paper_ru — основная (русский), paper — английская версия
+report/          подробный отчёт со всеми проверками
+docs/            журнал решений (journal.md) и протокол дрейфа позы (drift_protocol.md)
 tests/           модульные тесты
 ```
 
