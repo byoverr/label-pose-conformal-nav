@@ -26,7 +26,7 @@
 \begin{document}
 
 \title{Конформная калибровка открытословарных семантических карт при ошибках метки и позы%
-\thanks{Код, данные и подробный отчёт:\\ \url{https://github.com/byoverr/label-pose-conformal-nav}.}}
+\thanks{Код и данные: \url{https://github.com/byoverr/label-pose-conformal-nav}.}}
 
 \author{\IEEEauthorblockN{Сергей Щетинкин}
 \IEEEauthorblockA{Университет ИТМО, Санкт-Петербург}}
@@ -242,7 +242,7 @@ L3 --- 7~см, L4 --- 45~см. Отказ засчитан как покрыти
 чаще, приведён запас остальных. Запас «только геометрия» отсчитывается от всех занятых клеток.}
 \label{tab:coverage}
 \footnotesize
-\input{../report/tables/coverage.tex}
+\input{tables_ru/coverage.tex}
 \end{table*}
 
 \subsection{Покрытие при дрейфе позы}
@@ -272,7 +272,7 @@ $10/14 \approx 0{,}71$; совместный запас в том же опыт�
 \centering
 \includegraphics[width=\linewidth]{ru/composition_stress.png}
 \caption{Покрытие суммы отдельных запасов и совместного запаса в зависимости от доли сцен со сбоем локализации,
-$1 - \alpha = 0{,}7$; горизонтальная линия --- граница $1 - 2\alpha$ для суммы.}
+$1 - \alpha = 0{,}7$; горизонтальные линии --- цель 0,7 и граница $1 - 2\alpha$ для суммы.}
 \label{fig:composition}
 \end{figure}
 
@@ -293,7 +293,7 @@ $1 - \alpha = 0{,}7$; горизонтальная линия --- граница
 путём, число опасных путей из найденных, доля успешных миссий.}
 \label{tab:missions}
 \footnotesize
-\input{../report/tables/missions_pb.tex}
+\input{tables_ru/missions_pb.tex}
 \end{table*}
 
 Гарантия ограничивает риск, а не повышает успех. На трудных задачах планировщик без калибровки почти всегда находит
@@ -316,7 +316,7 @@ MobileSAM~\cite{mobilesam} опасны 12\,\% путей без калибро�
 \caption{Случайные задачи (420 в 21 сцене): доля успешных миссий; $^\ast$ --- есть опасные пути.}
 \label{tab:comparison}
 \footnotesize
-\input{../report/tables/comparison.tex}
+\input{tables_ru/comparison.tex}
 \end{table*}
 
 Разрыв с 98,36\,\% у~\cite{sundarsingh} в основном создаёт постановка. Мы сравниваем методы на наших сценах по схеме
@@ -347,7 +347,7 @@ $a = 1$ (разд.~\ref{sec:crc}) путь есть лишь в 39--46\,\% за�
 разбиений с отказом; доля трудных задач с путём и доля успешных случайных миссий.}
 \label{tab:detector}
 \footnotesize
-\input{../report/tables/detector.tex}
+\input{tables_ru/detector.tex}
 \end{table*}
 
 \textbf{Детекторы.} Худший промах растения дают два маленьких горшка в одной сцене. YOLO-World v2-x и
@@ -374,7 +374,7 @@ YOLOE~\cite{yoloe} их находят, но у каждого детектор�
 миссий в новой сцене; «по исполнению» --- с учётом дрейфа во время движения.}
 \label{tab:crc}
 \footnotesize
-\input{../report/tables/crc.tex}
+\input{tables_ru/crc.tex}
 \end{table*}
 
 \textbf{Риск пути.} Вместо отказа можно сообщать для пути конформную оценку риска. Если путь с зазором $c$ до области

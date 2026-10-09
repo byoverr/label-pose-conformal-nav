@@ -2,7 +2,6 @@
 <p align="center"><i>Conformal Calibration of Open-Vocabulary Semantic Maps under Label and Pose Uncertainty</i></p>
 <p align="center">
   <a href="paper/paper_ru.pdf"><b>Статья (PDF, 8 с.)</b></a> ·
-  <a href="report/report.pdf">Подробный отчёт (PDF, 17 с.)</a> ·
   <a href="paper/paper.pdf">English version (PDF)</a> ·
   <a href="#воспроизведение">Воспроизведение</a>
 </p>
@@ -147,7 +146,7 @@ make main           # загрузка данных, детекции, пром�
 make comparison     # сравнение с множествами меток по схеме 2×2
 make robustness     # уровень риска, стресс-тест, MobileSAM, одометрия, HM3D, шаг сетки, детекторы,
                     # ансамбль, SLAM, исполнение (каскад: run_verifier, select_cascade, make_cascade)
-make docs           # таблицы, статья paper/paper_ru.pdf, отчёт и английская версия (нужен tectonic)
+make docs           # таблицы, статья paper/paper_ru.pdf и английская версия paper/paper.pdf (нужен tectonic)
 make test           # модульные тесты
 ```
 
@@ -176,7 +175,6 @@ scripts/         по скрипту на шаг (run_*, compute_*, analyze_*, p
 configs/         уровни дрейфа, список сцен, сопоставление классов HM3D
 results/         промахи, исходы миссий, таблицы, рисунки (путеводитель — results/README.md)
 paper/           статья: paper_ru — основная (русский), paper — английская версия
-report/          подробный отчёт со всеми проверками
 docs/            журнал решений (journal.md) и протокол дрейфа позы (drift_protocol.md)
 tests/           модульные тесты
 ```

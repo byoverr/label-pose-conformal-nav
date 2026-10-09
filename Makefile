@@ -1,11 +1,11 @@
-# Reproduce every number in the paper and the report. Run from the repository root.
+# Reproduce every number in the article and the paper. Run from the repository root.
 # Heavy steps are resumable: finished scenes are skipped when a target is re-run.
 #
 #   make setup         virtual environment with pinned dependencies
 #   make main          data, detector, calibration scores, coverage, missions   (~3 h on a laptop)
 #   make comparison    closed-vocabulary comparison with per-cell label calibration
 #   make robustness    risk-level sweep, composition stress test, SAM, visual odometry, HM3D, grid
-#   make docs          report tables, report.pdf and paper.pdf (needs tectonic)
+#   make docs          tables, paper_ru.pdf (Russian article) and paper.pdf (English) (needs tectonic)
 #   make test          unit tests
 
 PY ?= .venv/bin/python
@@ -188,12 +188,11 @@ robustness: alpha composition sam vo hm3d grid detector yoloe regions risk ensem
 
 # --- documents ---------------------------------------------------------------------------------
 tables:
-	$(PY) scripts/make_report_tables.py
-	$(PY) scripts/plot_report_figures_ru.py
+	$(PY) scripts/make_tables.py
+	$(PY) scripts/plot_figures_ru.py
 	$(PY) scripts/plot_example.py v3_sc0_staging_20 --seed 1 --task 1 --paper --lang ru
 
 docs: tables
-	cd report && tectonic report.tex
 	cd paper && tectonic paper_ru.tex
 	cd paper && tectonic paper.tex
 

@@ -1,6 +1,6 @@
-"""LaTeX tables for the report and the paper, generated from the result CSVs (no hand-typed numbers).
+"""LaTeX tables for the Russian article and the English paper, generated from the result CSVs (no hand-typed numbers).
 
-Writes report/tables/*.tex (Russian, decimal comma) and paper/tables/*.tex (English).
+Writes paper/tables_ru/*.tex (Russian, decimal comma) and paper/tables/*.tex (English).
 """
 
 from decimal import ROUND_HALF_UP, Decimal
@@ -8,7 +8,7 @@ from pathlib import Path
 
 from s2m.io import read_csv
 
-OUT = Path("report/tables")
+OUT = Path("paper/tables_ru")
 ARM_RU = {
     "uncalibrated": "без калибровки",
     "label_cell": "множества меток",
@@ -64,7 +64,6 @@ def coverage_table():
     (OUT / "coverage.tex").write_text("\n".join(lines) + "\n")
 
 
-
 def missions_table(tag="_pb", levels=("L0", "L2", "L3")):
     path = Path(f"results/tables/missions{tag}.csv")
     if not path.exists():
@@ -82,65 +81,6 @@ def missions_table(tag="_pb", levels=("L0", "L2", "L3")):
         lines.append(f"{ARM_RU[arm]} & " + " & ".join(cells) + " \\\\")
     lines += ["\\bottomrule", "\\end{tabular}"]
     (OUT / f"missions{tag}.tex").write_text("\n".join(lines) + "\n")
-
-
-
-def alpha_table():
-    path = Path("results/tables/alpha_sweep.csv")
-    if not path.exists():
-        return
-    rows = [r for r in read_csv(path)]
-    get = lambda kind, a, arm, key: next((r[key] for r in rows if r["tasks"] == kind and r["alpha"] == a
-                                          and r["arm"] == arm), "nan")
-    lines = ["\\begin{tabular}{c|cc|cc|c|cc|cc}", "\\toprule",
-             "$\\alpha$ & \\multicolumn{2}{c|}{покрытие} & \\multicolumn{2}{c|}{$\\hat r$, м} & отказ & "
-             "\\multicolumn{2}{c|}{трудные: путь} & \\multicolumn{2}{c}{случайные: успех} \\\\",
-             " & раст. & велос. & раст. & велос. & раст. & совм. & оракул & совм. & оракул \\\\", "\\midrule"]
-    for a in sorted({r["alpha"] for r in rows}, key=float):
-        cells = [fmt(a, 2), fmt(get("pass_by", a, "joint", "coverage_mean_indoor_plant")),
-                 fmt(get("pass_by", a, "joint", "coverage_mean_bike")),
-                 fmt(get("pass_by", a, "joint", "radius_median_indoor_plant")),
-                 fmt(get("pass_by", a, "joint", "radius_median_bike")),
-                 fmt(get("pass_by", a, "joint", "abstain_rate_indoor_plant")),
-                 fmt(get("pass_by", a, "joint", "planned")), fmt(get("pass_by", a, "oracle", "planned")),
-                 fmt(get("random", a, "joint", "success")), fmt(get("random", a, "oracle", "success"))]
-        lines.append(" & ".join(cells) + " \\\\")
-    lines += ["\\bottomrule", "\\end{tabular}"]
-    (OUT / "alpha.tex").write_text("\n".join(lines) + "\n")
-
-
-def variants_table():
-    """One row per (variant, level), joint / separate / labels-only: coverage and radius, bike and plant."""
-    arms = ("label_only", "separate", "joint")
-    specs = []
-    sam = Path("results/tables/variants_sam.csv")
-    if sam.exists():
-        rows = read_csv(sam)
-        for m, name in (("box", "рамка + глубина"), ("sam", "MobileSAM")):
-            for lv in ("L0", "L4"):
-                specs.append((f"{name}, {lv}", [r for r in rows if r["masks"] == m and r["level"] == lv]))
-    vo = Path("results/tables/variants_vo.csv")
-    if vo.exists():
-        rows = read_csv(vo)
-        for lv in sorted({r["level"] for r in rows}, key=lambda lv: (lv.startswith("SLAM"), lv)):
-            name = (f"одометрия, каждый {lv[2:]}-й кадр" if lv.startswith("VO") else
-                    f"SLAM с замыканиями, каждый {lv[4:]}-й кадр")
-            specs.append((name, [r for r in rows if r["level"] == lv]))
-    if not specs:
-        return
-    lines = ["\\begin{tabular}{l|" + "cc" * len(arms) + "|" + "cc" * len(arms) + "}", "\\toprule",
-             "Вариант & \\multicolumn{6}{c|}{велосипед} & \\multicolumn{6}{c}{растение} \\\\",
-             " & " + " & ".join(f"\\multicolumn{{2}}{{c}}{{{SHORT_RU[a]}}}" for a in arms * 2) + " \\\\",
-             " & " + " & ".join(["покр. & $\\hat r$"] * len(arms) * 2) + " \\\\", "\\midrule"]
-    for name, rs in specs:
-        cells = []
-        for cls in ("bike", "indoor_plant"):
-            for arm in arms:
-                r = next((x for x in rs if x["class"] == cls and x["arm"] == arm), None)
-                cells += ["---", "---"] if r is None else [fmt(r["coverage_mean"]), radius_cell(r)]
-        lines.append(f"{name} & " + " & ".join(cells) + " \\\\")
-    lines += ["\\bottomrule", "\\end{tabular}"]
-    (OUT / "variants.tex").write_text("\n".join(lines) + "\n")
 
 
 def comparison_table():
@@ -255,32 +195,6 @@ def crc_table():
     (OUT / "crc.tex").write_text("\n".join(lines) + "\n")
 
 
-def execution_table():
-    """Plan-certified paths executed under continued drift (hard tasks), plan rule vs execution-aware rule, a = 0.2."""
-    path = Path("results/tables/execution.csv")
-    if not path.exists():
-        return
-    rows = read_csv(path)
-    lines = ["\\begin{tabular}{l|cc|ccc|ccc}", "\\toprule",
-             "Дрейф & \\multicolumn{2}{c|}{отклонение, \\% пути} & \\multicolumn{3}{c|}{гарантия по плану} & "
-             "\\multicolumn{3}{c}{с запасом на исполнение} \\\\",
-             " & медиана & 95\\,\\% & путь & опасн. & столкн. & путь & опасн. & столкн. \\\\", "\\midrule"]
-    import numpy as np
-    for kind, title in (("pb", "трудные"), ("rand", "случайные")):
-        for lv in ("L2", "L3", "L4"):
-            g = lambda rule: next((r for r in rows if r["tasks"] == kind and r["level"] == lv and r["rule"] == rule
-                                   and r["target_risk"] == "0.2"), None)
-            p, e = g("plan"), g("execution")
-            if p is None:
-                continue
-            cells = [fmt(100 * float(p["u_median"]), 1), fmt(100 * float(p["u_q95"]), 1)]
-            for r in (p, e):
-                cells += [fmt(r["certified"]), fmt(r["exec_unsafe_given_cert"], 3), fmt(r["exec_collision_given_cert"])]
-            lines.append(f"{lv}, {title} & " + " & ".join(cells) + " \\\\")
-    lines += ["\\bottomrule", "\\end{tabular}"]
-    (OUT / "execution.tex").write_text("\n".join(lines) + "\n")
-
-
 PAPER = Path("paper/tables")
 ARM_EN = {"uncalibrated": "uncalibrated", "label_cell": "label sets~\\cite{sundarsingh}", "geometry": "geometry only",
           "label_only": "labels only", "pose_only": "pose only", "separate": "sum", "joint": "\\textbf{joint (ours)}",
@@ -348,12 +262,9 @@ def paper_comparison_table():
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
     coverage_table()
-    alpha_table()
     comparison_table()
-    variants_table()
     detector_table()
     crc_table()
-    execution_table()
     missions_table("_pb")
     PAPER.mkdir(parents=True, exist_ok=True)
     paper_coverage_table()
